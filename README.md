@@ -2,7 +2,9 @@ Official-BlightVeilKillTracker
 
 KillTracker for BlightVeil StarCitizen org
 
-Download the .exe Make sure to launch the Game Launch, then launch the KillTracker, and enjoy
+Download the .exe From the Releases Page
+
+Make sure to launch the Game Launch, then launch the KillTracker, and enjoy
 
 No Support will be provided for Compiling your own KillTracker exe.
 
