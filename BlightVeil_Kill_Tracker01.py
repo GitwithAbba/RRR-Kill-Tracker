@@ -75,7 +75,7 @@ def destroy_player_zone(line, logger):
     global global_active_ship
     global global_active_ship_id
     if ("N/A" != global_active_ship) or ("N/A" != global_active_ship_id):
-        print("Ship Destroyed: " + global_active_ship + " with ID: " + global_active_ship_id)
+        print(f"Ship Destroyed: {global_active_ship} with ID: {global_active_ship_id}")
         global_active_ship = "N/A"
         global_active_ship_id = "N/A"
 
@@ -83,7 +83,7 @@ def destroy_player_zone(line, logger):
 def set_ac_ship(line, logger):
     global global_active_ship
     global_active_ship = line.split(' ')[5][1:-1]
-    print("Player has entered ship: " + global_active_ship)
+    print("Player has entered ship: ", global_active_ship)
 
 
 def set_player_zone(line, logger):
@@ -91,7 +91,7 @@ def set_player_zone(line, logger):
     global global_active_ship_id
     line_index = line.index("-> Entity ") + len("-> Entity ")
     if 0 == line_index:
-        print("Active Zone Change: " + global_active_ship)
+        print("Active Zone Change: ", global_active_ship)
         global_active_ship = "N/A"
         return
     potential_zone = line[line_index:].split(' ')[0]
@@ -100,7 +100,7 @@ def set_player_zone(line, logger):
         if potential_zone.startswith(x):
             global_active_ship = potential_zone[:potential_zone.rindex('_')]
             global_active_ship_id = potential_zone[potential_zone.rindex('_') + 1:]
-            print("Active Zone Change: " + global_active_ship + " with ID: " + global_active_ship_id)
+            print(f"Active Zone Change: {global_active_ship} with ID: {global_active_ship_id}")
             return
 
 
@@ -160,7 +160,6 @@ def set_sc_log_location():
         
 # Substrings to ignore
 ignore_kill_substrings = [
-    'CActor::Kill',
     'PU_Pilots',
     'NPC_Archetypes',
     'PU_Human',
@@ -173,12 +172,12 @@ def check_substring_list(line, substring_list):
     Check if any substring from the list is present in the given line.
     """
     for substring in substring_list:
-        if substring in line:
+        if substring.lower() in line.lower():
             return True
     return False
 
 
-def parse_log_line(line, target_name, logger):
+def parse_kill_line(line, target_name, logger):
     split_line = line.split(' ')
 
     kill_time = split_line[0].strip('\'')
@@ -236,25 +235,12 @@ def parse_log_line(line, target_name, logger):
         show_loading_animation(logger, app)
         logger.log(f"Kill event will not be sent. Enter valid key to establish connection with Servitor...")
 
+
 def read_existing_log(log_file_location, rsi_name):
     sc_log = open(log_file_location, "r")
     lines = sc_log.readlines()
     for line in lines:
-        if (-1 != line.find(rsi_name)) and (-1 != line.find("CActor::Kill")):
-            if (-1 == line.find("PU_Pilots")) and (-1 == line.find("NPC_Archetypes")) and (
-                    -1 == line.find("PU_Human")):
-                parse_log_line(line, rsi_name)
-        elif -1 != line.find("<Context Establisher Done>"):
-            set_game_mode(line)
-        elif (-1 != line.find("OnEntityEnterZone")) and (-1 != line.find(rsi_name)):
-            set_player_zone(line)
-        elif -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned") and (
-                "SC_Default" != global_game_mode) and (-1 != line.find(global_player_geid)):
-            set_ac_ship(line)
-        elif ((-1 != line.find("<Vehicle Destruction>")) or (
-                -1 != line.find("<local client>: Entering control state dead"))) and (
-                -1 != line.find(global_active_ship_id)):
-            destroy_player_zone(line)
+        read_log_line(line, rsi_name, True, logger)
 
 
 def find_rsi_handle(log_file_location):
@@ -362,6 +348,35 @@ def setup_gui(game_running):
         key_entry = tk.Entry(key_frame, width=30, font=("Times New Roman", 12))
         key_entry.pack(side=tk.LEFT)
 
+        # Check for API Key file
+        def load_existing_key():
+            if os.path.exists("killtracker_key.cfg"):
+                try:
+                    f = open("killtracker_key.cfg", "r")
+                    entered_key = f.readline()
+                    if entered_key:
+                        logger.log("Activating key...")
+                        show_loading_animation(logger, app)
+                        logger.log("Establishing Servitor Connection...")
+                        logger.log(".")
+                        app.update_idletasks()
+                        time.sleep(0.5)
+                        logger.log("..")
+                        app.update_idletasks()
+                        time.sleep(0.5)
+                        logger.log("...")
+                        app.update_idletasks()
+                        time.sleep(0.5)
+
+                        # Set and log key activation
+                        api_key["value"] = entered_key
+                        logger.log("Servitor Connection Established.")
+                        logger.log("Go forth and slaughter...")
+                    else:
+                        logger.log("Error: No key detected. Input valid key to establish connection with Servitor.")
+                except Exception as e:
+                    logger.log(f"Error in activate_key: {e}")
+
         def activate_key():
             try:
                 entered_key = key_entry.get().strip()
@@ -383,6 +398,8 @@ def setup_gui(game_running):
                     api_key["value"] = entered_key
                     logger.log("Servitor Connection Established.")
                     logger.log("Go forth and slaughter...")
+                    f = open("killtracker_key.cfg", "w")
+                    f.write(entered_key)
                 else:
                     logger.log("Error: No key detected. Input valid key to establish connection with Servitor.")
             except Exception as e:
@@ -397,6 +414,16 @@ def setup_gui(game_running):
             fg="#ffffff",
         )
         activate_button.pack(side=tk.LEFT, padx=(5, 0))
+
+        load_key_button = tk.Button(
+            key_frame,
+            text="Load Existing Key",
+            font=("Times New Roman", 12),
+            command=load_existing_key,
+            bg="#000000",
+            fg="#ffffff",
+        )
+        load_key_button.pack(side=tk.LEFT, padx=(5, 0))
 
         # Log Display
         text_area = scrolledtext.ScrolledText(
@@ -435,6 +462,24 @@ def setup_gui(game_running):
     return app, logger
 
 
+# Event checking logic. Look for substrings, do stuff based on what we find.
+def read_log_line(line, rsi_name, upload_kills, logger):
+    if -1 != line.find("<Context Establisher Done>"):
+        set_game_mode(line, logger)
+    elif -1 != line.find(rsi_name):
+        if -1 != line.find("OnEntityEnterZone"):
+            set_player_zone(line, logger)
+        if -1 != line.find("CActor::Kill") and not check_substring_list(line, ignore_kill_substrings) and upload_kills:
+            parse_kill_line(line, rsi_name, logger)
+    elif -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned") and (
+            "SC_Default" != global_game_mode) and (-1 != line.find(global_player_geid)):
+        set_ac_ship(line, logger)
+    elif ((-1 != line.find("<Vehicle Destruction>")) or (
+            -1 != line.find("<local client>: Entering control state dead"))) and (
+            -1 != line.find(global_active_ship_id)):
+        destroy_player_zone(line, logger)
+
+
 def tail_log(log_file_location, rsi_name, logger):
     """Read the log file and display events in the GUI."""
     global global_game_mode, global_player_geid
@@ -446,11 +491,12 @@ def tail_log(log_file_location, rsi_name, logger):
     logger.log("Kill Tracking Initiated...")
     logger.log("Enter key to establish Servitor connection...")
 
-    # Read initial lines to determine the game mode
+    # Read all lines to find out what game mode player is currently, in case they booted up late.
+    # Don't upload kills, we don't want repeating last sessions kills incase they are actually available.
     lines = sc_log.readlines()
+    print("Loading old log (if available)! Kills shown will not be uploaded as they are stale.")
     for line in lines:
-        if "<Context Establisher Done>" in line:
-            set_game_mode(line, logger)
+        read_log_line(line, rsi_name, False, logger)
 
     # Main loop to monitor the log
     last_log_file_size = os.stat(log_file_location).st_size
@@ -465,15 +511,8 @@ def tail_log(log_file_location, rsi_name, logger):
                 sc_log = open(log_file_location, "r")
                 last_log_file_size = os.stat(log_file_location).st_size
         else:
-            if "CActor::Kill" in line and rsi_name in line:
-                if "PU_Pilots" not in line and "NPC_Archetypes" not in line and "PU_Human" not in line:
-                    parse_log_line(line, rsi_name, logger)
-            elif "<Context Establisher Done>" in line:
-                set_game_mode(line, logger)
-            elif "OnEntityEnterZone" in line and rsi_name in line:
-                set_player_zone(line, logger)
-            elif "CPlayerShipRespawnManager::OnVehicleSpawned" in line and global_game_mode != "SC_Default":
-                set_ac_ship(line, logger)
+            read_log_line(line, rsi_name, True, logger)
+
 
 def start_tail_log_thread(log_file_location, rsi_name, logger):
     """Start the log tailing in a separate thread."""
@@ -481,10 +520,12 @@ def start_tail_log_thread(log_file_location, rsi_name, logger):
     thread.daemon = True
     thread.start()
 
+
 def is_game_running():
     """Check if Star Citizen is running."""
     return check_if_process_running("StarCitizen") is not None
-    
+
+
 def auto_shutdown(app, delay_in_seconds, logger=None):
     def shutdown():
         time.sleep(delay_in_seconds) 
@@ -501,6 +542,7 @@ def auto_shutdown(app, delay_in_seconds, logger=None):
     # Run the shutdown logic in a separate thread
     shutdown_thread = threading.Thread(target=shutdown, daemon=True)
     shutdown_thread.start()
+
 
 if __name__ == '__main__':
     game_running = is_game_running()
