@@ -176,8 +176,18 @@ def check_substring_list(line, substring_list):
             return True
     return False
 
+def check_exclusion_scenarios(line, logger):
+    global global_game_mode
+    if global_game_mode == "EA_FreeFlight" and -1 != line.find("Crash"):
+        print("Probably a ship reset, ignoring kill!")
+        return False
+    return True
+
+
 
 def parse_kill_line(line, target_name, logger):
+    if not check_exclusion_scenarios(line, logger):
+        return
     split_line = line.split(' ')
 
     kill_time = split_line[0].strip('\'')
