@@ -24,7 +24,8 @@
 3. Retrieve an API key from Beowulf on the IronPoint Discord Server
 
 ### 📦 Installation
-
+  
+  - If you do not want to download the .exe, you can simply...
 ```bash
 git clone https://github.com/yourname/BeowulfHunter.git
 cd BeowulfHunter
