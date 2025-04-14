@@ -1,11 +1,33 @@
-Official-BlightVeilKillTracker
+# 🏴‍☠️ BeowulfHunter
 
-KillTracker for BlightVeil StarCitizen org
+**A Star Citizen kill tracker and combat logger for the pirate org IronPoint.**
 
-Download the .exe From the Releases Page, or run the python kill tracker file from console.
+![beohunter](https://github.com/user-attachments/assets/64815013-ecfb-4797-9a27-2ab7c89f0f1a)
 
-Make sure to launch the Game Launch, then launch the KillTracker, and enjoy
 
-No Support will be provided for Compiling your own KillTracker exe.
+---
 
-Any Abuse of the KillTracker Will Result in your Kills Not being Tracked
+## ⚙️ Features
+
+- ✅ Real-time log monitoring
+- ☠️ Kill detection
+- 📦 Auto-submission to API and Database
+- 📊 Leaderboard through the Discord bot Beowulf
+- 💀 Pirate-themed interface
+
+---
+
+## 🚀 Getting Started
+
+1. You can download the precompiled .exe and run without installation, or...
+2. You can ```git clone``` the codebase and compile it yourself.
+3. Retrieve an API key from Beowulf on the IronPoint Discord Server
+
+### 📦 Installation
+
+```bash
+git clone https://github.com/yourname/BeowulfHunter.git
+cd BeowulfHunter
+npm install
+npm start
+```
