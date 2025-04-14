@@ -268,12 +268,18 @@ def parse_kill_line(line, target_name, logger):
 
     split_line = line.split(' ')
 #  <2025-04-13T17:17:51.279Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2677329226210' killed by 'DocHound' [202061381370] using 'GATS_BallisticGatling_S3_2677329225797' [Class unknown] with damage type 'VehicleDestruction' from direction x: 0.000000, y: 0.000000, z: 0.000000 [Team_ActorTech][Actor]
+#  <2025-04-14T16:42:53.465Z> [Notice] <Actor Death> CActor::Kill: 'idkausername_27' [202063593546] in zone 'OOC_Stanton_2a_Cellin' killed by 'DocHound' [202061381370] using 'lbco_pistol_energy_01_2698343630880' [Class lbco_pistol_energy_01] with damage type 'Bullet' from direction x: -0.995284, y: -0.073818, z: -0.062935 [Team_ActorTech][Actor]
+#  <2025-04-14T17:10:51.498Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2699085238610' killed by 'DocHound' [202061381370] using 'RSI_Bespoke_BallisticCannon_A_2699085238957' [Class unknown] with damage type 'VehicleDestruction' from direction x: 0.000000, y: 0.000000, z: 0.000000 [Team_ActorTech][Actor]
+#  <2025-04-14T17:16:18.806Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2699085240659' killed by 'DocHound' [202061381370] using 'MRCK_S10_RSI_Polaris_Torpedo_lb_2699085238828' [Class MRCK_S10_RSI_Polaris_Torpedo_lb] with damage type 'Explosion' from direction x: 0.383955, y: 1.041579, z: -0.330675 [Team_ActorTech][Actor]
+#  <2025-04-14T18:27:04.421Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'SolarSystem_2700185231297' killed by 'DocHound' [202061381370] using 'unknown' [Class unknown] with damage type 'Explosion' from direction x: -0.874768, y: -2.434404, z: 0.141657 [Team_ActorTech][Actor] ::: grenade kill
+
 
     kill_time = split_line[0].strip('\'')
     killed = split_line[5].strip('\'')
     killed_zone = split_line[9].strip('\'')
     killer = split_line[12].strip('\'')
     weapon = split_line[15].strip('\'')
+    damage_type = split_line[21].strip('\'')
 
     if killed == killer or killer.lower() == "unknown" or killed == target_name:
         logger.log("You DIED.")
@@ -291,6 +297,7 @@ def parse_kill_line(line, target_name, logger):
         'game_mode': global_game_mode,
         'client_ver': "7.0",
         'killers_ship': global_active_ship,
+        'damage_type': damage_type
     }
 
     headers = {
@@ -364,7 +371,7 @@ def set_game_mode(line, logger):
 def setup_gui(game_running):
     app = tk.Tk()
     app.title("BeowulfHunter")
-    app.geometry("600x450")
+    app.geometry("650x450")
     app.resizable(False, False)
     app.configure(bg="#1a1a1a")
 
