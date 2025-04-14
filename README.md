@@ -45,4 +45,5 @@ npm start
 Which can be verified in the code, itself.
   - There is a "zone" tracked in the code, but the zone correlates to where the player is sitting when they make the kill. For most cases, this is the ship itself. This can be chalked up to CiG being bad with naming conventions. There ARE coordinates given in the kill log, but I disregard these.
   - Example kill log:
+
 ```<2025-04-13T17:17:51.279Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2677329226210' killed by 'DocHound' [202061381370] using 'GATS_BallisticGatling_S3_2677329225797' [Class unknown] with damage type 'VehicleDestruction' from direction x: 0.000000, y: 0.000000, z: 0.000000 [Team_ActorTech][Actor]```
