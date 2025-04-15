@@ -196,8 +196,8 @@ def validate_api_key(api_key, player_name):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data) # TODO: post or get? Why??
-        if response.status_code == 200:
+        response = requests.get(url, headers=headers, json=data) # TODO: post or get? Why??
+        if response.status_code == 200 or response.status_code == 201:
             return True  # Success
         else:
             return False  # Failure
@@ -376,7 +376,7 @@ def setup_gui(game_running):
     app.configure(bg="#1a1a1a")
 
     try:
-        font_path = resource_path("assets/Orbitron.ttf")
+        font_path = resource_path("Orbitron.ttf")
         custom_font = tkFont.Font(file=font_path, size=12)
         app.option_add("*Font", custom_font)
     except Exception as e:
@@ -384,7 +384,7 @@ def setup_gui(game_running):
 
     # Set the icon
     try:
-        icon_path = resource_path("assets/beoicon.ico")
+        icon_path = resource_path("beo.ico")
         print("Resolved icon path:", icon_path)
         if os.path.exists(icon_path):
             app.iconbitmap(icon_path)
@@ -396,7 +396,7 @@ def setup_gui(game_running):
 
     # Add Banner
     try:
-        banner_path = resource_path("assets/beohunter.png")
+        banner_path = resource_path("beohunter.png")
         original_image = Image.open(banner_path)
 
         # Resize to 50% of original size (or change to specific size like (600, 150))
@@ -641,7 +641,9 @@ def get_api_key_expiration_time(api_key):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.get(url, headers=headers, json=data)
+        print(f"\n{response}\n")
+
         if response.status_code == 200:
             response_data = response.json()
             expiration_time_str = response_data.get("expires_at")
@@ -753,5 +755,3 @@ if __name__ == '__main__':
         auto_shutdown(app, 72 * 60 * 60)  # Fallback without logger
 
     app.mainloop()
-
-
