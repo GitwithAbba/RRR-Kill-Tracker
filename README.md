@@ -21,7 +21,7 @@
 
 1. You can download the precompiled .exe and run without installation, or...
 2. You can ```git clone``` the codebase and compile it yourself.
-3. Retrieve an API key from Beowulf on the IronPoint Discord Server
+3. Retrieve an API key from Beowulf on the IronPoint Discord Server (/create-key)
 
 ### 📦 Installation
   
