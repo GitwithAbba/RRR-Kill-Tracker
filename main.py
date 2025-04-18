@@ -15,10 +15,26 @@ import datetime
 from dotenv import load_dotenv
 from PIL import Image, ImageTk
 
-load_dotenv() # Load environment variables from .env file
+load_dotenv()  # Load environment variables from .env file
 # API_KEY = os.getenv("API_KEY") # Example how to use the .env file
 
-local_version = "7.0"
+# ─── Servitor config ───────────────────────────────────────────────────────────
+BACKEND_URL = os.getenv("BACKEND_URL").rstrip("/")
+API_KEY = os.getenv("API_KEY")
+VALIDATE_URL = f"{BACKEND_URL}/keys/validate"
+REPORT_KILL_URL = f"{BACKEND_URL}/reportKill"
+
+if not BACKEND_URL or not API_KEY:
+    messagebox.showerror(
+        "Configuration Error",
+        "Please set BACKEND_URL and API_KEY in your .env file."
+        "Please set BACKEND_URL and API_KEY in your .env file.",
+    )
+    sys.exit(1)
+
+
+# ─── Version & globals ──────────────────────────────────────────────────────────
+local_version = os.getenv("LOCAL_VERSION", "7.0")
 api_key = {"value": None}
 
 global_game_mode = "Nothing"
@@ -27,55 +43,67 @@ global_active_ship_id = "N/A"
 global_player_geid = "N/A"
 
 global_ship_list = [
-    'DRAK', 'ORIG', 'AEGS', 'ANVL', 'CRUS', 'BANU', 'MISC',
-    'KRIG', 'XNAA', 'ARGO', 'VNCL', 'ESPR', 'RSI', 'CNOU',
-    'GRIN', 'TMBL', 'GAMA'
+    "DRAK",
+    "ORIG",
+    "AEGS",
+    "ANVL",
+    "CRUS",
+    "BANU",
+    "MISC",
+    "KRIG",
+    "XNAA",
+    "ARGO",
+    "VNCL",
+    "ESPR",
+    "RSI",
+    "CNOU",
+    "GRIN",
+    "TMBL",
+    "GAMA",
 ]
 
-def resource_path(relative_path):
-    """ Get the absolute path to the resource (works for PyInstaller .exe). """
+
+# ─── Helpers ────────────────────────────────────────────────────────────────────
+def resource_path(rel):
     try:
-        base_path = sys._MEIPASS  
+        base = sys._MEIPASS
     except AttributeError:
-        base_path = os.path.abspath(".")  
-    return os.path.join(base_path, relative_path)
+        base = os.path.abspath(".")
+    return os.path.join(base, rel)
+
 
 def check_for_updates():
-    """Check for updates using the GitHub API."""
-    github_api_url = "https://api.github.com/repos/martinmedic/BeowulfHunterPy/releases/latest"
-
+    url = "https://api.github.com/repos/martinmedic/BeowulfHunterPy/releases/latest"
     try:
-        headers = {'User-Agent': 'Killtracker/1.1'}
-        response = requests.get(github_api_url, headers=headers, timeout=5)
-
-        if response.status_code == 200:
-            release_data = response.json()
-            remote_version = release_data.get("tag_name", "v1.0").strip("v")
-            download_url = release_data.get("html_url", "")
-
-            if version.parse(local_version) < version.parse(remote_version):
-                return f"Update available: {remote_version}. Download it here: {download_url}"
-        else:
-            print(f"GitHub API error: {response.status_code}")
-    except Exception as e:
-        print(f"Error checking for updates: {e}")
+        r = requests.get(url, headers={"User-Agent": "Killtracker/1.1"}, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            remote = data.get("tag_name", "v0").lstrip("v")
+            link = data.get("html_url", "")
+            if version.parse(local_version) < version.parse(remote):
+                return f"Update available: {remote}. Download here: {link}"
+    except Exception:
+        pass
     return None
 
-class EventLogger:
-    def __init__(self, text_widget):
-        self.text_widget = text_widget
 
-    def log(self, message):
-        self.text_widget.config(state=tk.NORMAL)
-        self.text_widget.insert(tk.END, message + "\n")
-        self.text_widget.config(state=tk.DISABLED)
-        self.text_widget.see(tk.END)
-        
+class EventLogger:
+    def __init__(self, widget):
+        self.w = widget
+
+    def log(self, m):
+        self.w.config(state=tk.NORMAL)
+        self.w.insert(tk.END, m + "\n")
+        self.w.config(state=tk.DISABLED)
+        self.w.see(tk.END)
+
+
 def show_loading_animation(logger, app):
-    for dots in [".","..", "..."]:
+    for dots in [".", "..", "..."]:
         logger.log(dots)
         app.update_idletasks()
         time.sleep(0.2)
+
 
 def destroy_player_zone(line, logger):
     global global_active_ship
@@ -85,10 +113,12 @@ def destroy_player_zone(line, logger):
         global_active_ship = "N/A"
         global_active_ship_id = "N/A"
 
+
 def set_ac_ship(line, logger):
     global global_active_ship
-    global_active_ship = line.split(' ')[5][1:-1]
+    global_active_ship = line.split(" ")[5][1:-1]
     print("Player has entered ship: ", global_active_ship)
+
 
 def set_player_zone(line, logger):
     global global_active_ship
@@ -98,38 +128,43 @@ def set_player_zone(line, logger):
         print("Active Zone Change: ", global_active_ship)
         global_active_ship = "N/A"
         return
-    potential_zone = line[line_index:].split(' ')[0]
+    potential_zone = line[line_index:].split(" ")[0]
     potential_zone = potential_zone[1:-1]
     for x in global_ship_list:
         if potential_zone.startswith(x):
-            global_active_ship = potential_zone[:potential_zone.rindex('_')]
-            global_active_ship_id = potential_zone[potential_zone.rindex('_') + 1:]
-            print(f"Active Zone Change: {global_active_ship} with ID: {global_active_ship_id}")
+            global_active_ship = potential_zone[: potential_zone.rindex("_")]
+            global_active_ship_id = potential_zone[potential_zone.rindex("_") + 1 :]
+            print(
+                f"Active Zone Change: {global_active_ship} with ID: {global_active_ship_id}"
+            )
             return
 
+
 def check_if_process_running(process_name):
-    """ Check if a process is running by name. """
-    for proc in psutil.process_iter(['pid', 'name', 'exe']):
-        if process_name.lower() in proc.info['name'].lower():
-            return proc.info['exe']
+    """Check if a process is running by name."""
+    for proc in psutil.process_iter(["pid", "name", "exe"]):
+        if process_name.lower() in proc.info["name"].lower():
+            return proc.info["exe"]
     return None
 
+
 def find_game_log_in_directory(directory):
-    """ Search for Game.log in the directory and its parent directory. """
-    game_log_path = os.path.join(directory, 'Game.log')
+    """Search for Game.log in the directory and its parent directory."""
+    game_log_path = os.path.join(directory, "Game.log")
     if os.path.exists(game_log_path):
         print(f"Found Game.log in: {directory}")
         return game_log_path
     # If not found in the same directory, check the parent directory
     parent_directory = os.path.dirname(directory)
-    game_log_path = os.path.join(parent_directory, 'Game.log')
+    game_log_path = os.path.join(parent_directory, "Game.log")
     if os.path.exists(game_log_path):
         print(f"Found Game.log in parent directory: {parent_directory}")
         return game_log_path
     return None
 
+
 def set_sc_log_location():
-    """ Check for RSI Launcher and Star Citizen Launcher, and set SC_LOG_LOCATION accordingly. """
+    """Check for RSI Launcher and Star Citizen Launcher, and set SC_LOG_LOCATION accordingly."""
     # Check if RSI Launcher is running
     rsi_launcher_path = check_if_process_running("RSI Launcher")
     if not rsi_launcher_path:
@@ -153,20 +188,22 @@ def set_sc_log_location():
 
     if log_path:
         print("Setting SC_LOG_LOCATION to:", log_path)
-        os.environ['SC_LOG_LOCATION'] = log_path
+        os.environ["SC_LOG_LOCATION"] = log_path
         return log_path
     else:
         print("Game.log not found in expected locations.")
         return None
-        
+
+
 # Substrings to ignore
 ignore_kill_substrings = [
-    'PU_Pilots',
-    'NPC_Archetypes',
-    'PU_Human',
-    'kopion',
-    'marok',
+    "PU_Pilots",
+    "NPC_Archetypes",
+    "PU_Human",
+    "kopion",
+    "marok",
 ]
+
 
 def check_substring_list(line, substring_list):
     """
@@ -177,6 +214,7 @@ def check_substring_list(line, substring_list):
             return True
     return False
 
+
 def check_exclusion_scenarios(line, logger):
     global global_game_mode
     if global_game_mode == "EA_FreeFlight" and -1 != line.find("Crash"):
@@ -184,35 +222,29 @@ def check_exclusion_scenarios(line, logger):
         return False
     return True
 
-def validate_api_key(api_key, player_name):
-    url = os.getenv("KEY_VALIDATE_URL")
-    headers = {
-        "Authorization": api_key,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "api_key": api_key,
-        "player_name": rsi_handle  # Include the player name
-    }
 
+# ─── Key validation ─────────────────────────────────────────────────────────────
+def validate_api_key(key: str) -> bool:
+    """
+    Hit GET /keys/validate with Bearer <key>.
+    """
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
     try:
-        response = requests.get(url, headers=headers, json=data) # TODO: post or get? Why??
-        if response.status_code == 200 or response.status_code == 201:
-            return True  # Success
-        else:
-            return False  # Failure
-    except requests.RequestException as e:
-        print(f"API Key validation error: {e}")
+        r = requests.get(VALIDATE_URL, headers=headers, timeout=5)
+        return r.status_code in (200, 201)
+    except Exception as e:
+        print("Key validation error:", e)
         return False
 
-def save_api_key(key):
-    try:
-        with open("killtracker_key.cfg", "w") as f:
-            f.write(key)
-        api_key["value"] = key  # Make sure to save the key in the global api_key dictionary as well
-        logger.log(f"API key saved successfully: {key}")
-    except Exception as e:
-        logger.log(f"Error saving API key: {e}")
+
+def save_api_key(key: str):
+    with open("killtracker_key.cfg", "w") as f:
+        f.write(key)
+    api_key["value"] = key
+
 
 # Activate the API key by sending it to the server
 def activate_key(key_entry):
@@ -222,17 +254,25 @@ def activate_key(key_entry):
         if log_file_location:
             player_name = get_player_name(log_file_location)  # Retrieve the player name
             if player_name:
-                if validate_api_key(entered_key, player_name):  # Pass both the key and player name
+                if validate_api_key(entered_key):
+                    # Pass both the key and player name
                     save_api_key(entered_key)  # Save the key for future use
-                    logger.log("Key activated and saved. Servitor connection established.")
+                    logger.log(
+                        "Key activated and saved. Servitor connection established."
+                    )
                 else:
-                    logger.log("Invalid key or player name. Please enter a valid API key.")
+                    logger.log(
+                        "Invalid key or player name. Please enter a valid API key."
+                    )
             else:
-                logger.log("RSI Handle not found. Please ensure the game is running and the log file is accessible.")
+                logger.log(
+                    "RSI Handle not found. Please ensure the game is running and the log file is accessible."
+                )
         else:
             logger.log("Log file location not found.")
     else:
         logger.log("No key entered. Please input a valid key.")
+
 
 def get_player_name(log_file_location):
     # Retrieve the RSI handle using the existing function
@@ -242,6 +282,7 @@ def get_player_name(log_file_location):
         return None
     return rsi_handle
 
+
 # Load existing key from the file
 def load_existing_key():
     try:
@@ -249,7 +290,9 @@ def load_existing_key():
             entered_key = f.readline().strip()
             if entered_key:
                 api_key["value"] = entered_key
-                logger.log("Existing key loaded. Attempting to establish Servitor connection...")
+                logger.log(
+                    "Existing key loaded. Attempting to establish Servitor connection..."
+                )
                 if validate_api_key(entered_key):
                     logger.log("Servitor connection established.")
                 else:
@@ -259,76 +302,59 @@ def load_existing_key():
     except FileNotFoundError:
         logger.log("No existing key found. Please enter a valid key.")
 
-# Trigger kill event
-def parse_kill_line(line, target_name, logger):
-    print(f"Current API Key: {api_key['value']}")
 
-    if not check_exclusion_scenarios(line, logger):
+# ─── Kill parsing & upload ──────────────────────────────────────────────────────
+def parse_kill_line(line: str, target: str, logger: EventLogger):
+    if global_game_mode == "EA_FreeFlight" and "Crash" in line:
         return
 
-    split_line = line.split(' ')
-#  <2025-04-13T17:17:51.279Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2677329226210' killed by 'DocHound' [202061381370] using 'GATS_BallisticGatling_S3_2677329225797' [Class unknown] with damage type 'VehicleDestruction' from direction x: 0.000000, y: 0.000000, z: 0.000000 [Team_ActorTech][Actor]
-#  <2025-04-14T16:42:53.465Z> [Notice] <Actor Death> CActor::Kill: 'idkausername_27' [202063593546] in zone 'OOC_Stanton_2a_Cellin' killed by 'DocHound' [202061381370] using 'lbco_pistol_energy_01_2698343630880' [Class lbco_pistol_energy_01] with damage type 'Bullet' from direction x: -0.995284, y: -0.073818, z: -0.062935 [Team_ActorTech][Actor]
-#  <2025-04-14T17:10:51.498Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2699085238610' killed by 'DocHound' [202061381370] using 'RSI_Bespoke_BallisticCannon_A_2699085238957' [Class unknown] with damage type 'VehicleDestruction' from direction x: 0.000000, y: 0.000000, z: 0.000000 [Team_ActorTech][Actor]
-#  <2025-04-14T17:16:18.806Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'ANVL_Hornet_F7A_Mk2_2699085240659' killed by 'DocHound' [202061381370] using 'MRCK_S10_RSI_Polaris_Torpedo_lb_2699085238828' [Class MRCK_S10_RSI_Polaris_Torpedo_lb] with damage type 'Explosion' from direction x: 0.383955, y: 1.041579, z: -0.330675 [Team_ActorTech][Actor]
-#  <2025-04-14T18:27:04.421Z> [Notice] <Actor Death> CActor::Kill: 'Mercuriuss' [200146297631] in zone 'SolarSystem_2700185231297' killed by 'DocHound' [202061381370] using 'unknown' [Class unknown] with damage type 'Explosion' from direction x: -0.874768, y: -2.434404, z: 0.141657 [Team_ActorTech][Actor] ::: grenade kill
+    parts = line.split(" ")
+    # …extract your fields exactly as you had them…
+    kill_time = parts[0].strip("<>")
+    killed = parts[5].strip("'")
+    killed_zone = parts[9].strip("'")
+    killer = parts[12].strip("'")
+    weapon = parts[15].strip("'")
+    dmg = parts[21].strip("'")
 
-
-    kill_time = split_line[0].strip('\'')
-    killed = split_line[5].strip('\'')
-    killed_zone = split_line[9].strip('\'')
-    killer = split_line[12].strip('\'')
-    weapon = split_line[15].strip('\'')
-    damage_type = split_line[21].strip('\'')
-
-    if killed == killer or killer.lower() == "unknown" or killed == target_name:
+    if killer.lower() == "unknown" or killed == killer or killed == target:
         logger.log("You DIED.")
         return
 
-    event_message = f"You have killed {killed},"
-    logger.log(event_message)
     json_data = {
-        'player': target_name,
-        'victim': killed,
-        'time': kill_time,
-        'zone': killed_zone,
-        'weapon': weapon,
-        'rsi_profile': f"https://robertsspaceindustries.com/citizens/{killed}",
-        'game_mode': global_game_mode,
-        'client_ver': "7.0",
-        'killers_ship': global_active_ship,
-        'damage_type': damage_type
+        "player": target,
+        "victim": killed,
+        "time": kill_time,
+        "zone": killed_zone,
+        "weapon": weapon,
+        "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
+        "game_mode": global_game_mode,
+        "client_ver": local_version,
+        "killers_ship": global_active_ship,
+        "damage_type": dmg,
     }
 
-    headers = {
-        'content-type': 'application/json',
-        'Authorization': api_key["value"] if api_key["value"] else ""
+    hdrs = {
+        "Authorization": f"Bearer {api_key['value']}",
+        "Content-Type": "application/json",
     }
-
-    if not api_key["value"]:
-        logger.log("Kill event will not be sent. Enter valid key to establish connection with Servitor...")
-        return
 
     try:
-        response = requests.post(
-            os.getenv("REPORT_KILL_URL"),
-            headers=headers,
-            data=json.dumps(json_data)
-        )
-        if response.status_code == 200 or response.status_code == 201:
-            logger.log("Kill logged.")
+        r = requests.post(REPORT_KILL_URL, headers=hdrs, json=json_data, timeout=5)
+        if r.status_code in (200, 201):
+            logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
         else:
-            # logger.log(f"Servitor connectivity error: {response.status_code}.")
-            logger.log("Relaunch BeowulfHunter and reconnect with a new Key.")
-    except requests.exceptions.RequestException as e:
-        logger.log(f"Error sending kill event: {e}")
-        # logger.log("Kill event will not be sent. Please ensure a valid key and try again.")
+            logger.log(f"❌ Upload failed ({r.status_code})")
+    except Exception as e:
+        logger.log(f"Error sending kill: {e}")
+
 
 def read_existing_log(log_file_location, rsi_name):
     sc_log = open(log_file_location, "r")
     lines = sc_log.readlines()
     for line in lines:
         read_log_line(line, rsi_name, True, logger)
+
 
 def find_rsi_handle(log_file_location):
     acct_str = "<Legacy login response> [CIG-net] User Login Success"
@@ -340,9 +366,10 @@ def find_rsi_handle(log_file_location):
             if 0 == line_index:
                 print("RSI_HANDLE: Not Found!")
                 exit()
-            potential_handle = line[line_index:].split(' ')[0]
+            potential_handle = line[line_index:].split(" ")[0]
             return potential_handle[0:-1]
     return None
+
 
 def find_rsi_geid(log_file_location):
     global global_player_geid
@@ -351,22 +378,24 @@ def find_rsi_geid(log_file_location):
     lines = sc_log.readlines()
     for line in lines:
         if -1 != line.find(acct_kw):
-            global_player_geid = line.split(' ')[11]
+            global_player_geid = line.split(" ")[11]
             print("Player geid: " + global_player_geid)
             return
+
 
 def set_game_mode(line, logger):
     global global_game_mode
     global global_active_ship
     global global_active_ship_id
-    split_line = line.split(' ')
-    game_mode = split_line[8].split("=")[1].strip("\"")
+    split_line = line.split(" ")
+    game_mode = split_line[8].split("=")[1].strip('"')
     if game_mode != global_game_mode:
         global_game_mode = game_mode
 
     if "SC_Default" == global_game_mode:
         global_active_ship = "N/A"
         global_active_ship_id = "N/A"
+
 
 def setup_gui(game_running):
     app = tk.Tk()
@@ -439,7 +468,11 @@ def setup_gui(game_running):
         key_frame.pack(pady=(10, 10))
 
         key_label = tk.Label(
-            key_frame, text="Enter Key:", font=("Times New Roman", 12), fg="#ffffff", bg="#1a1a1a"
+            key_frame,
+            text="Enter Key:",
+            font=("Times New Roman", 12),
+            fg="#ffffff",
+            bg="#1a1a1a",
         )
         key_label.pack(side=tk.LEFT, padx=(0, 5))
 
@@ -453,7 +486,7 @@ def setup_gui(game_running):
             highlightcolor="#ff0000",
             bg="#0a0a0a",
             fg="#ffffff",
-            insertbackground="#ff5555"
+            insertbackground="#ff5555",
         )
         key_entry.pack(side=tk.LEFT)
 
@@ -471,20 +504,33 @@ def setup_gui(game_running):
         def activate_key():
             entered_key = key_entry.get().strip()  # Access key_entry here
             if entered_key:
-                log_file_location = set_sc_log_location()  # Assuming this is defined elsewhere
+                log_file_location = (
+                    set_sc_log_location()
+                )  # Assuming this is defined elsewhere
                 if log_file_location:
                     player_name = get_player_name(log_file_location)
                     if player_name:
-                        if validate_api_key(entered_key, player_name):  # Pass both the key and player name
+                        if validate_api_key(
+                            entered_key
+                        ):  # Pass both the key and player name
                             save_api_key(entered_key)  # Save the key for future use
-                            logger.log("Key activated and saved. Servitor connection established.")
-                            api_status_label.config(text="API Status: Valid (Expires in 72 hours)", fg="green")
+                            logger.log(
+                                "Key activated and saved. Servitor connection established."
+                            )
+                            api_status_label.config(
+                                text="API Status: Valid (Expires in 72 hours)",
+                                fg="green",
+                            )
                             start_api_key_countdown(entered_key, api_status_label)
                         else:
                             logger.log("Invalid key. Please enter a valid API key.")
-                            api_status_label.config(text="API Status: Invalid", fg="red")
+                            api_status_label.config(
+                                text="API Status: Invalid", fg="red"
+                            )
                     else:
-                        logger.log("RSI Handle not found. Please ensure the game is running and the log file is accessible.")
+                        logger.log(
+                            "RSI Handle not found. Please ensure the game is running and the log file is accessible."
+                        )
                         api_status_label.config(text="API Status: Error", fg="yellow")
                 else:
                     logger.log("Log file location not found.")
@@ -492,7 +538,7 @@ def setup_gui(game_running):
             else:
                 logger.log("No key entered. Please input a valid key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
-        
+
         button_style = {
             "bg": "#0f0f0f",
             "fg": "#ff5555",
@@ -500,14 +546,11 @@ def setup_gui(game_running):
             "activeforeground": "#ffffff",
             "relief": "ridge",
             "bd": 2,
-            "font": ("Orbitron", 12)
+            "font": ("Orbitron", 12),
         }
-        
+
         activate_button = tk.Button(
-            key_frame,
-            text="Activate",
-            command=activate_key,
-            **button_style
+            key_frame, text="Activate", command=activate_key, **button_style
         )
         activate_button.pack(side=tk.LEFT, padx=(5, 0))
 
@@ -518,14 +561,21 @@ def setup_gui(game_running):
                     entered_key = f.readline().strip()
                     if entered_key:
                         api_key["value"] = entered_key  # Assign the loaded key
-                        logger.log(f"Existing key loaded: {entered_key}. Attempting to establish Servitor connection...")
-                        if validate_api_key(entered_key, get_player_name(set_sc_log_location())):  # Validate with player name
+                        logger.log(
+                            f"Existing key loaded: {entered_key}. Attempting to establish Servitor connection..."
+                        )
+                        if validate_api_key(entered_key):  # Validate with player name
                             logger.log("Servitor connection established.")
-                            api_status_label.config(text="API Status: Valid (Expires in 72 hours)", fg="green")
+                            api_status_label.config(
+                                text="API Status: Valid (Expires in 72 hours)",
+                                fg="green",
+                            )
                             start_api_key_countdown(entered_key, api_status_label)
                         else:
                             logger.log("Invalid key. Please input a valid key.")
-                            api_status_label.config(text="API Status: Invalid", fg="red")
+                            api_status_label.config(
+                                text="API Status: Invalid", fg="red"
+                            )
                     else:
                         logger.log("No valid key found. Please enter a key.")
                         api_status_label.config(text="API Status: Invalid", fg="red")
@@ -540,14 +590,14 @@ def setup_gui(game_running):
             "activeforeground": "#ffffff",
             "relief": "ridge",
             "bd": 2,
-            "font": ("Orbitron", 12)
+            "font": ("Orbitron", 12),
         }
 
         load_key_button = tk.Button(
             key_frame,
             text="Load Existing Key",
             command=load_existing_key,
-            **button_style
+            **button_style,
         )
         load_key_button.pack(side=tk.LEFT, padx=(5, 0))
 
@@ -564,7 +614,7 @@ def setup_gui(game_running):
             highlightthickness=2,
             highlightbackground="#ff0000",
             highlightcolor="#ff0000",
-            font=("Orbitron", 12)
+            font=("Orbitron", 12),
         )
         text_area.pack(padx=10, pady=10)
 
@@ -599,12 +649,16 @@ def setup_gui(game_running):
 
     return app, logger
 
+
 def start_api_key_countdown(api_key, api_status_label):
     """
     Function to start the countdown for the API key's expiration, refreshing expiry data periodically.
     """
+
     def update_countdown():
-        expiration_time = get_api_key_expiration_time(api_key)  # Fetch latest expiration time
+        expiration_time = get_api_key_expiration_time(
+            api_key
+        )  # Fetch latest expiration time
         if not expiration_time:
             api_status_label.config(text="API Status: Expired", fg="red")
             return
@@ -627,18 +681,14 @@ def start_api_key_countdown(api_key, api_status_label):
 
     update_countdown()
 
+
 def get_api_key_expiration_time(api_key):
     """
     Retrieve the expiration time for the API key from the validation server.
     """
     url = os.getenv("KEY_VALIDATE_URL")
-    headers = {
-        "Authorization": api_key,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "player_name": rsi_handle
-    }
+    headers = {"Authorization": api_key, "Content-Type": "application/json"}
+    data = {"player_name": rsi_handle}
 
     try:
         response = requests.get(url, headers=headers, json=data)
@@ -648,16 +698,22 @@ def get_api_key_expiration_time(api_key):
             response_data = response.json()
             expiration_time_str = response_data.get("expires_at")
             if expiration_time_str:
-                return datetime.datetime.strptime(expiration_time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+                return datetime.datetime.strptime(
+                    expiration_time_str, "%Y-%m-%dT%H:%M:%S.%fZ"
+                )
             else:
                 print("Error: 'expires_at' not found in response")
         else:
-            print("Error fetching expiration time:", response.json().get("error", "Unknown error"))
+            print(
+                "Error fetching expiration time:",
+                response.json().get("error", "Unknown error"),
+            )
     except requests.RequestException as e:
         print(f"API request error: {e}")
 
     # Fallback: Expire immediately if there's an error
     return None
+
 
 def read_log_line(line, rsi_name, upload_kills, logger):
     if -1 != line.find("<Context Establisher Done>"):
@@ -665,15 +721,24 @@ def read_log_line(line, rsi_name, upload_kills, logger):
     elif -1 != line.find(rsi_name):
         if -1 != line.find("OnEntityEnterZone"):
             set_player_zone(line, logger)
-        if -1 != line.find("CActor::Kill") and not check_substring_list(line, ignore_kill_substrings) and upload_kills:
+        if (
+            -1 != line.find("CActor::Kill")
+            and not check_substring_list(line, ignore_kill_substrings)
+            and upload_kills
+        ):
             parse_kill_line(line, rsi_name, logger)
-    elif -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned") and (
-            "SC_Default" != global_game_mode) and (-1 != line.find(global_player_geid)):
+    elif (
+        -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned")
+        and ("SC_Default" != global_game_mode)
+        and (-1 != line.find(global_player_geid))
+    ):
         set_ac_ship(line, logger)
-    elif ((-1 != line.find("<Vehicle Destruction>")) or (
-            -1 != line.find("<local client>: Entering control state dead"))) and (
-            -1 != line.find(global_active_ship_id)):
+    elif (
+        (-1 != line.find("<Vehicle Destruction>"))
+        or (-1 != line.find("<local client>: Entering control state dead"))
+    ) and (-1 != line.find(global_active_ship_id)):
         destroy_player_zone(line, logger)
+
 
 def tail_log(log_file_location, rsi_name, logger):
     """Read the log file and display events in the GUI."""
@@ -689,7 +754,9 @@ def tail_log(log_file_location, rsi_name, logger):
     # Read all lines to find out what game mode player is currently, in case they booted up late.
     # Don't upload kills, we don't want repeating last sessions kills incase they are actually available.
     lines = sc_log.readlines()
-    print("Loading old log (if available)! Kills shown will not be uploaded as they are stale.")
+    print(
+        "Loading old log (if available)! Kills shown will not be uploaded as they are stale."
+    )
     for line in lines:
         read_log_line(line, rsi_name, False, logger)
 
@@ -708,34 +775,44 @@ def tail_log(log_file_location, rsi_name, logger):
         else:
             read_log_line(line, rsi_name, True, logger)
 
+
 def start_tail_log_thread(log_file_location, rsi_name, logger):
     """Start the log tailing in a separate thread."""
-    thread = threading.Thread(target=tail_log, args=(log_file_location, rsi_name, logger))
+    thread = threading.Thread(
+        target=tail_log, args=(log_file_location, rsi_name, logger)
+    )
     thread.daemon = True
     thread.start()
+
 
 def is_game_running():
     """Check if Star Citizen is running."""
     return check_if_process_running("StarCitizen") is not None
 
+
 def auto_shutdown(app, delay_in_seconds, logger=None):
     def shutdown():
-        time.sleep(delay_in_seconds) 
+        time.sleep(delay_in_seconds)
         if logger:
-            logger.log("Application has been open for 72 hours. Shutting down in 60 seconds.") 
+            logger.log(
+                "Application has been open for 72 hours. Shutting down in 60 seconds."
+            )
         else:
-            print("Application has been open for 72 hours. Shutting down in 60 seconds.")  
+            print(
+                "Application has been open for 72 hours. Shutting down in 60 seconds."
+            )
 
         time.sleep(60)
 
-        app.quit() 
-        sys.exit(0) 
+        app.quit()
+        sys.exit(0)
 
     # Run the shutdown logic in a separate thread
     shutdown_thread = threading.Thread(target=shutdown, daemon=True)
     shutdown_thread.start()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     game_running = is_game_running()
 
     app, logger = setup_gui(game_running)
@@ -747,7 +824,7 @@ if __name__ == '__main__':
             rsi_handle = find_rsi_handle(log_file_location)
             if rsi_handle:
                 start_tail_log_thread(log_file_location, rsi_handle, logger)
-    
+
     # Initiate auto-shutdown after 72 hours (72 * 60 * 60 seconds)
     if logger:
         auto_shutdown(app, 72 * 60 * 60, logger)  # Pass logger only if initialized
