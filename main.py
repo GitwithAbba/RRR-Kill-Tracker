@@ -686,37 +686,34 @@ def start_api_key_countdown(api_key, api_status_label):
     update_countdown()
 
 
-def get_api_key_expiration_time(api_key):
+def get_api_key_expiration_time(api_key: str) -> datetime.datetime | None:
     """
     Retrieve the expiration time for the API key from the validation server.
     """
-    url = os.getenv("KEY_VALIDATE_URL")
-    headers = {"Authorization": api_key, "Content-Type": "application/json"}
-    data = {"player_name": rsi_handle}
-
     try:
-        response = requests.get(url, headers=headers, json=data)
-        print(f"\n{response}\n")
+        r = requests.get(
+            VALIDATE_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=5,
+        )
+        if r.status_code != 200:
+            print("Error fetching expiration time:", r.status_code, r.text)
+            return None
 
-        if response.status_code == 200:
-            response_data = response.json()
-            expiration_time_str = response_data.get("expires_at")
-            if expiration_time_str:
-                return datetime.datetime.strptime(
-                    expiration_time_str, "%Y-%m-%dT%H:%M:%S.%fZ"
-                )
-            else:
-                print("Error: 'expires_at' not found in response")
-        else:
-            print(
-                "Error fetching expiration time:",
-                response.json().get("error", "Unknown error"),
-            )
-    except requests.RequestException as e:
-        print(f"API request error: {e}")
+        payload = r.json()
+        expires_at = payload.get("expires_at")
+        if not expires_at:
+            print("Missing expires_at in response")
+            return None
 
-    # Fallback: Expire immediately if there's an error
-    return None
+        # parse the RFC3339 timestamp (strip trailing Z)
+        return datetime.datetime.fromisoformat(expires_at.rstrip("Z"))
+    except Exception as e:
+        print("API request error:", e)
+        return None
 
 
 def read_log_line(line, rsi_name, upload_kills, logger):
