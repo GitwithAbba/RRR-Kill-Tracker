@@ -14,6 +14,7 @@ import time
 import datetime
 from dotenv import load_dotenv
 from PIL import Image, ImageTk
+from datetime import datetime, timedelta
 
 load_dotenv()  # Load environment variables from .env file
 # API_KEY = os.getenv("API_KEY") # Example how to use the .env file
@@ -283,26 +284,6 @@ def get_player_name(log_file_location):
     return rsi_handle
 
 
-# Load existing key from the file
-def load_existing_key():
-    try:
-        with open("killtracker_key.cfg", "r") as f:
-            entered_key = f.readline().strip()
-            if entered_key:
-                api_key["value"] = entered_key
-                logger.log(
-                    "Existing key loaded. Attempting to establish Servitor connection..."
-                )
-                if validate_api_key(entered_key):
-                    logger.log("Servitor connection established.")
-                else:
-                    logger.log("Invalid key. Please input a valid key.")
-            else:
-                logger.log("No valid key found. Please enter a key.")
-    except FileNotFoundError:
-        logger.log("No existing key found. Please enter a valid key.")
-
-
 # ─── Kill parsing & upload ──────────────────────────────────────────────────────
 def parse_kill_line(line: str, target: str, logger: EventLogger):
     if global_game_mode == "EA_FreeFlight" and "Crash" in line:
@@ -506,41 +487,39 @@ def setup_gui(game_running):
 
         # Activate API Key
         def activate_key():
-            entered_key = key_entry.get().strip()  # Access key_entry here
-            if entered_key:
-                log_file_location = (
-                    set_sc_log_location()
-                )  # Assuming this is defined elsewhere
-                if log_file_location:
-                    player_name = get_player_name(log_file_location)
-                    if player_name:
-                        if validate_api_key(
-                            entered_key
-                        ):  # Pass both the key and player name
-                            save_api_key(entered_key)  # Save the key for future use
-                            logger.log(
-                                "Key activated and saved. Servitor connection established."
-                            )
-                            api_status_label.config(
-                                text="API Status: Valid (Expires in 72 hours)",
-                                fg="green",
-                            )
-                            start_api_key_countdown(entered_key, api_status_label)
-                        else:
-                            logger.log("Invalid key. Please enter a valid API key.")
-                            api_status_label.config(
-                                text="API Status: Invalid", fg="red"
-                            )
-                    else:
-                        logger.log(
-                            "RSI Handle not found. Please ensure the game is running and the log file is accessible."
-                        )
-                        api_status_label.config(text="API Status: Error", fg="yellow")
-                else:
-                    logger.log("Log file location not found.")
-                    api_status_label.config(text="API Status: Error", fg="yellow")
-            else:
+            entered_key = key_entry.get().strip()
+            if not entered_key:
                 logger.log("No key entered. Please input a valid key.")
+                api_status_label.config(text="API Status: Invalid", fg="red")
+                return
+
+            log_file_location = set_sc_log_location()
+            if not log_file_location:
+                logger.log("Log file location not found.")
+                api_status_label.config(text="API Status: Error", fg="yellow")
+                return
+
+            player_name = get_player_name(log_file_location)
+            if not player_name:
+                logger.log(
+                    "RSI Handle not found. Please ensure the game is running and the log file is accessible."
+                )
+                api_status_label.config(text="API Status: Error", fg="yellow")
+                return
+
+            # Now validate
+            if validate_api_key(entered_key):
+                # success path
+                save_api_key(entered_key)
+                logger.log("Key activated and saved. Servitor connection established.")
+                api_status_label.config(text="API Status: Valid", fg="green")
+
+                # start a 72h countdown
+                expires_at = datetime.utcnow() + timedelta(hours=72)
+                start_api_key_countdown(expires_at, api_status_label)
+            else:
+                # failure path
+                logger.log("Invalid key. Please enter a valid API key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
 
         button_style = {
@@ -563,28 +542,29 @@ def setup_gui(game_running):
             try:
                 with open("killtracker_key.cfg", "r") as f:
                     entered_key = f.readline().strip()
-                    if entered_key:
-                        api_key["value"] = entered_key  # Assign the loaded key
-                        logger.log(
-                            f"Existing key loaded: {entered_key}. Attempting to establish Servitor connection..."
-                        )
-                        if validate_api_key(entered_key):  # Validate with player name
-                            logger.log("Servitor connection established.")
-                            api_status_label.config(
-                                text="API Status: Valid (Expires in 72 hours)",
-                                fg="green",
-                            )
-                            start_api_key_countdown(entered_key, api_status_label)
-                        else:
-                            logger.log("Invalid key. Please input a valid key.")
-                            api_status_label.config(
-                                text="API Status: Invalid", fg="red"
-                            )
-                    else:
-                        logger.log("No valid key found. Please enter a key.")
-                        api_status_label.config(text="API Status: Invalid", fg="red")
             except FileNotFoundError:
                 logger.log("No existing key found. Please enter a valid key.")
+                api_status_label.config(text="API Status: Invalid", fg="red")
+                return
+
+            if not entered_key:
+                logger.log("No valid key found. Please enter a key.")
+                api_status_label.config(text="API Status: Invalid", fg="red")
+                return
+
+            # Now validate
+            if validate_api_key(entered_key):
+                save_api_key(entered_key)
+                logger.log(
+                    f"Existing key loaded: {entered_key}. Servitor connection established."
+                )
+                api_status_label.config(text="API Status: Valid", fg="green")
+
+                # start a 72h countdown
+                expires_at = datetime.utcnow() + timedelta(hours=72)
+                start_api_key_countdown(expires_at, api_status_label)
+            else:
+                logger.log("Invalid key. Please input a valid key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
 
         button_style = {
@@ -654,66 +634,26 @@ def setup_gui(game_running):
     return app, logger
 
 
-def start_api_key_countdown(api_key, api_status_label):
+def start_api_key_countdown(expiration_time: datetime, api_status_label):
     """
-    Function to start the countdown for the API key's expiration, refreshing expiry data periodically.
+    Show a live countdown to `expiration_time` on the given label.
     """
 
-    def update_countdown():
-        expiration_time = get_api_key_expiration_time(
-            api_key
-        )  # Fetch latest expiration time
-        if not expiration_time:
+    def countdown():
+        remaining = expiration_time - datetime.utcnow()
+        if remaining.total_seconds() > 0:
+            days = remaining.days
+            hours, rem = divmod(remaining.seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            api_status_label.config(
+                text=f"API Status: Valid (Expires in {days}d {hours}h {minutes}m {seconds}s)",
+                fg="green",
+            )
+            api_status_label.after(1000, countdown)
+        else:
             api_status_label.config(text="API Status: Expired", fg="red")
-            return
 
-        def countdown():
-            remaining_time = expiration_time - datetime.datetime.utcnow()
-            if remaining_time.total_seconds() > 0:
-                hours, remainder = divmod(remaining_time.seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                countdown_text = f"API Status: Valid (Expires in {remaining_time.days}d {hours}h {minutes}m {seconds}s)"
-                api_status_label.config(text=countdown_text, fg="green")
-                api_status_label.after(1000, countdown)  # Update every second
-            else:
-                api_status_label.config(text="API Status: Expired", fg="red")
-
-        countdown()
-
-        # Refresh expiration time every 60 seconds to stay in sync with the server
-        api_status_label.after(60000, update_countdown)
-
-    update_countdown()
-
-
-def get_api_key_expiration_time(api_key: str) -> datetime.datetime | None:
-    """
-    Retrieve the expiration time for the API key from the validation server.
-    """
-    try:
-        r = requests.get(
-            VALIDATE_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=5,
-        )
-        if r.status_code != 200:
-            print("Error fetching expiration time:", r.status_code, r.text)
-            return None
-
-        payload = r.json()
-        expires_at = payload.get("expires_at")
-        if not expires_at:
-            print("Missing expires_at in response")
-            return None
-
-        # parse the RFC3339 timestamp (strip trailing Z)
-        return datetime.datetime.fromisoformat(expires_at.rstrip("Z"))
-    except Exception as e:
-        print("API request error:", e)
-        return None
+    countdown()
 
 
 def read_log_line(line, rsi_name, upload_kills, logger):
