@@ -321,6 +321,9 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         logger.log("You DIED.")
         return
 
+    # 1) decide which feed (AC vs PU) based on game_mode
+    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
+
     json_data = {
         "player": target,
         "victim": killed,
@@ -329,6 +332,7 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         "weapon": weapon,
         "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
         "game_mode": global_game_mode,
+        "mode": mode,
         "client_ver": local_version,
         "killers_ship": global_active_ship,
         "damage_type": dmg,
