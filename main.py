@@ -15,6 +15,7 @@ import datetime
 from dotenv import load_dotenv
 from PIL import Image, ImageTk
 from datetime import datetime, timedelta
+import json
 
 load_dotenv()  # Load environment variables from .env file
 # API_KEY = os.getenv("API_KEY") # Example how to use the .env file
@@ -242,8 +243,15 @@ def validate_api_key(key: str) -> bool:
 
 
 def save_api_key(key: str):
+    # compute a 72‑hour expiration from now
+    expires_at = (datetime.utcnow() + timedelta(hours=72)).isoformat() + "Z"
+    payload = {"key": key, "expires_at": expires_at}
+
+    # write both the key and its expiration to disk
     with open("killtracker_key.cfg", "w") as f:
-        f.write(key)
+        json.dump(payload, f)
+
+    # store in memory for immediate use
     api_key["value"] = key
 
 
@@ -541,31 +549,33 @@ def setup_gui(game_running):
         def load_existing_key():
             try:
                 with open("killtracker_key.cfg", "r") as f:
-                    entered_key = f.readline().strip()
-            except FileNotFoundError:
+                    info = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
                 logger.log("No existing key found. Please enter a valid key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
                 return
 
-            if not entered_key:
-                logger.log("No valid key found. Please enter a key.")
+            entered_key = info.get("key")
+            expires_at_str = info.get("expires_at")
+            if not entered_key or not expires_at_str:
+                logger.log("Invalid key file. Please enter a new key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
                 return
 
-            # Now validate
-            if validate_api_key(entered_key):
-                save_api_key(entered_key)
-                logger.log(
-                    f"Existing key loaded: {entered_key}. Servitor connection established."
-                )
-                api_status_label.config(text="API Status: Valid", fg="green")
-
-                # start a 72h countdown
-                expires_at = datetime.utcnow() + timedelta(hours=72)
-                start_api_key_countdown(expires_at, api_status_label)
-            else:
+            if not validate_api_key(entered_key):
                 logger.log("Invalid key. Please input a valid key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
+                return
+
+            # success!
+            api_key["value"] = entered_key
+            logger.log(
+                f"Existing key loaded: {entered_key}. Servitor connection established."
+            )
+            api_status_label.config(text="API Status: Valid", fg="green")
+
+            expires_at = datetime.fromisoformat(info["expires_at"].rstrip("Z"))
+            start_api_key_countdown(expires_at, api_status_label)
 
         button_style = {
             "bg": "#0f0f0f",
