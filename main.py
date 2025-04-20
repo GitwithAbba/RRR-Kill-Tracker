@@ -306,10 +306,33 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
     weapon = parts[15].strip("'")
     dmg = parts[21].strip("'")
 
-    if killer.lower() == "unknown" or killed == killer or killed == target:
+    # You died?
+    if killed == target and killer.lower() != "unknown":
+        # build death payload
+        death = {
+            "killer": killer,
+            "victim": target,
+            "time": kill_time,
+            "zone": killed_zone,
+            "weapon": weapon,
+            "damage_type": dmg,
+            # match fields in DeathEvent
+            "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
+            "game_mode": global_game_mode,
+            "killers_ship": global_active_ship,
+        }
+        hdrs = {
+            "Authorization": f"Bearer {api_key['value']}",
+            "Content-Type": "application/json",
+        }
+        try:
+            requests.post(
+                f"{BACKEND_URL}/reportDeath", headers=hdrs, json=death, timeout=5
+            )
+        except Exception as e:
+            logger.log(f"❌ Failed to report death: {e}")
         logger.log("You DIED.")
         return
-
     # 1) decide which feed (AC vs PU) based on game_mode
     mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
