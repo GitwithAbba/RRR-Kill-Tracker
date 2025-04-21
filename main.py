@@ -298,7 +298,6 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         return
 
     parts = line.split(" ")
-    # …extract your fields exactly as you had them…
     kill_time = parts[0].strip("<>")
     killed = parts[5].strip("'")
     killed_zone = parts[9].strip("'")
@@ -306,9 +305,10 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
     weapon = parts[15].strip("'")
     dmg = parts[21].strip("'")
 
-    # You died?
+    # ——— Death case ———
     if killed == target and killer.lower() != "unknown":
-        # build death payload
+        mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
+
         death = {
             "killer": killer,
             "victim": target,
@@ -316,9 +316,9 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
             "zone": killed_zone,
             "weapon": weapon,
             "damage_type": dmg,
-            # match fields in DeathEvent
             "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
             "game_mode": global_game_mode,
+            "mode": mode,
             "killers_ship": global_active_ship,
         }
         hdrs = {
@@ -327,15 +327,18 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         }
         try:
             requests.post(
-                f"{BACKEND_URL}/reportDeath", headers=hdrs, json=death, timeout=5
+                f"{BACKEND_URL}/reportDeath",
+                headers=hdrs,
+                json=death,
+                timeout=5,
             )
         except Exception as e:
             logger.log(f"❌ Failed to report death: {e}")
         logger.log("You DIED.")
         return
-    # 1) decide which feed (AC vs PU) based on game_mode
-    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
+    # ——— Kill case ———
+    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
     json_data = {
         "player": target,
         "victim": killed,
@@ -349,14 +352,17 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         "killers_ship": global_active_ship,
         "damage_type": dmg,
     }
-
     hdrs = {
         "Authorization": f"Bearer {api_key['value']}",
         "Content-Type": "application/json",
     }
-
     try:
-        r = requests.post(REPORT_KILL_URL, headers=hdrs, json=json_data, timeout=5)
+        r = requests.post(
+            REPORT_KILL_URL,
+            headers=hdrs,
+            json=json_data,
+            timeout=5,
+        )
         if r.status_code in (200, 201):
             logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
         else:
