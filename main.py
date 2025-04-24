@@ -663,7 +663,7 @@ def setup_gui(game_running):
 
     footer_text = tk.Label(
         footer,
-        text="RRRthur is a clone of BeowulfHunter which is a clone of BlightVeil's KillTracker - Credits: IronPoint: (DocHound), BlightVeil: (CyberBully-Actual, BossGamer09, Holiday)",
+        text="RRRthur Tracker is a clone of BeowulfHunter which is a clone of BlightVeil's KillTracker - Credits: IronPoint: (DocHound), BlightVeil: (CyberBully-Actual, BossGamer09, Holiday)",
         font=("Times New Roman", 10),
         fg="#bcbcd8",
         bg="#3e3b4d",
