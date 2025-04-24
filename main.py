@@ -12,31 +12,15 @@ import sys
 from packaging import version
 import time
 import datetime
-from dotenv import load_dotenv
 from PIL import Image, ImageTk
 from datetime import datetime, timedelta
 import json
 
-load_dotenv()  # Load environment variables from .env file
-# API_KEY = os.getenv("API_KEY") # Example how to use the .env file
-
-# ─── Servitor config ───────────────────────────────────────────────────────────
-BACKEND_URL = os.getenv("BACKEND_URL").rstrip("/")
-API_KEY = os.getenv("API_KEY")
-VALIDATE_URL = f"{BACKEND_URL}/keys/validate"
-REPORT_KILL_URL = f"{BACKEND_URL}/reportKill"
-
-if not BACKEND_URL or not API_KEY:
-    messagebox.showerror(
-        "Configuration Error",
-        "Please set BACKEND_URL and API_KEY in your .env file."
-        "Please set BACKEND_URL and API_KEY in your .env file.",
-    )
-    sys.exit(1)
+from config import BACKEND_URL, API_KEY, VALIDATE_URL, REPORT_KILL_URL, REPORT_DEATH_URL
 
 
 # ─── Version & globals ──────────────────────────────────────────────────────────
-local_version = os.getenv("LOCAL_VERSION", "7.0")
+local_version = "7.0"
 api_key = {"value": None}
 
 global_game_mode = "Nothing"
