@@ -421,7 +421,7 @@ def set_game_mode(line, logger):
 
 def setup_gui(game_running):
     app = tk.Tk()
-    app.title("BeowulfHunter")
+    app.title("RRRthur Tracker")
     app.geometry("650x450")
     app.resizable(False, False)
     app.configure(bg="#1a1a1a")
@@ -435,7 +435,7 @@ def setup_gui(game_running):
 
     # Set the icon
     try:
-        icon_path = resource_path("beo.ico")
+        icon_path = resource_path("3R_Transparent.ico")
         print("Resolved icon path:", icon_path)
         if os.path.exists(icon_path):
             app.iconbitmap(icon_path)
@@ -447,7 +447,7 @@ def setup_gui(game_running):
 
     # Add Banner
     try:
-        banner_path = resource_path("beohunter.png")
+        banner_path = resource_path("3R_Transparent.png")
         original_image = Image.open(banner_path)
 
         # Resize to 50% of original size (or change to specific size like (600, 150))
@@ -647,7 +647,7 @@ def setup_gui(game_running):
         # Relaunch Message
         message_label = tk.Label(
             app,
-            text="You must launch Star Citizen before starting the tracker.\n\nPlease close this window, launch Star Citizen, and relaunch BeowulfHunter. ",
+            text="You must launch Star Citizen before starting the tracker.\n\nPlease close this window, launch Star Citizen, and relaunch RRRthur Tracker. ",
             font=("Times New Roman", 14),
             fg="#ff4444",
             bg="#1a1a1a",
@@ -658,17 +658,19 @@ def setup_gui(game_running):
         logger = None
 
     # Footer
-    footer = tk.Frame(app, bg="#3e3b4d", height=30)
+    footer = tk.Frame(app, bg="#3e3b4d", height=50)
     footer.pack(side=tk.BOTTOM, fill=tk.X)
 
     footer_text = tk.Label(
         footer,
-        text="BeowulfHunter is a clone of BlightVeil's KillTracker - Credits: BlightVeil: (CyberBully-Actual, BossGamer09, Holiday)",
+        text="RRRthur is a clone of BeowulfHunter which is a clone of BlightVeil's KillTracker - Credits: IronPoint: (DocHound), BlightVeil: (CyberBully-Actual, BossGamer09, Holiday)",
         font=("Times New Roman", 10),
         fg="#bcbcd8",
         bg="#3e3b4d",
+        wraplength=600,
+        justify="center",
     )
-    footer_text.pack(pady=5)
+    footer_text.pack(padx=10, pady=5, fill="x")
 
     return app, logger
 
