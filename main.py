@@ -15,6 +15,7 @@ import datetime
 from PIL import Image, ImageTk
 from datetime import datetime, timedelta
 import json
+import winsound
 
 from config import BACKEND_URL, API_KEY, VALIDATE_URL, REPORT_KILL_URL, REPORT_DEATH_URL
 
@@ -27,6 +28,7 @@ global_game_mode = "Nothing"
 global_active_ship = "N/A"
 global_active_ship_id = "N/A"
 global_player_geid = "N/A"
+global_active_zone = "Unknown"
 
 global_ship_list = [
     "DRAK",
@@ -106,23 +108,34 @@ def set_ac_ship(line, logger):
     print("Player has entered ship: ", global_active_ship)
 
 
-def set_player_zone(line, logger):
-    global global_active_ship
-    global global_active_ship_id
+# ─── Zone & ship parsing ────────────────────────────────────────────────────────
+def set_player_zone(line: str, logger: EventLogger):
+    global global_active_zone, global_active_ship, global_active_ship_id
+
+    # 1) pull out the *real* map‐zone
+    try:
+        # log lines look like "...OnEntityEnterZone -> Zone ['OOC_Stanton_1b_Aberdeen']..."
+        zone_str = line.split("-> Zone ")[1].split(" ")[0].strip("[]\"'")
+        global_active_zone = zone_str
+        logger.log(f"🌐 Entered Zone: {global_active_zone}")
+    except Exception:
+        # if that fails, leave global_active_zone unchanged
+        pass
+
+    # 2) *then* fall back to your existing ship‐entity logic:
     line_index = line.index("-> Entity ") + len("-> Entity ")
-    if 0 == line_index:
-        print("Active Zone Change: ", global_active_ship)
+    if line_index == len("-> Entity "):
+        # malformed, clear out
         global_active_ship = "N/A"
+        global_active_ship_id = "N/A"
         return
-    potential_zone = line[line_index:].split(" ")[0]
-    potential_zone = potential_zone[1:-1]
+
+    potential_zone = line[line_index:].split(" ")[0][1:-1]
     for x in global_ship_list:
         if potential_zone.startswith(x):
             global_active_ship = potential_zone[: potential_zone.rindex("_")]
             global_active_ship_id = potential_zone[potential_zone.rindex("_") + 1 :]
-            print(
-                f"Active Zone Change: {global_active_ship} with ID: {global_active_ship_id}"
-            )
+            logger.log(f"🚀 Active Ship: {global_active_ship}")
             return
 
 
@@ -276,6 +289,12 @@ def get_player_name(log_file_location):
     return rsi_handle
 
 
+# ─── Play sound on kill ──────────────────────────────────────────────────────
+def play_kill_sound():
+    path = resource_path(os.path.join("assets", "kill.wav"))
+    winsound.PlaySound(path, winsound.SND_FILENAME)
+
+
 # ─── Kill parsing & upload ──────────────────────────────────────────────────────
 def parse_kill_line(line: str, target: str, logger: EventLogger):
     if global_game_mode == "EA_FreeFlight" and "Crash" in line:
@@ -289,65 +308,59 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
     weapon = parts[15].strip("'")
     dmg = parts[21].strip("'")
 
-    # ——— Death case ———
-    if killed == target and killer.lower() != "unknown":
-        mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
+    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
+    # — Death (you got killed) —
+    if killed == target and killer.lower() != "unknown":
         death = {
             "killer": killer,
             "victim": target,
             "time": kill_time,
-            "zone": killed_zone,
+            "zone": global_active_zone,  # use the parsed zone
             "weapon": weapon,
             "damage_type": dmg,
             "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
             "game_mode": global_game_mode,
             "mode": mode,
-            "killers_ship": global_active_ship,
+            "killers_ship": global_active_ship,  # your ship at time of death
+            "victim_ship": global_active_ship,  # same, since *you* are the victim
         }
-        hdrs = {
+        headers = {
             "Authorization": f"Bearer {api_key['value']}",
             "Content-Type": "application/json",
         }
         try:
             requests.post(
-                f"{BACKEND_URL}/reportDeath",
-                headers=hdrs,
-                json=death,
-                timeout=5,
+                f"{BACKEND_URL}/reportDeath", headers=headers, json=death, timeout=5
             )
         except Exception as e:
             logger.log(f"❌ Failed to report death: {e}")
         logger.log("You DIED.")
         return
 
-    # ——— Kill case ———
-    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
+    # — Kill (you killed someone else) —
     json_data = {
         "player": target,
         "victim": killed,
         "time": kill_time,
-        "zone": killed_zone,
+        "zone": global_active_zone,  # the star‐system you’re in
         "weapon": weapon,
         "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
         "game_mode": global_game_mode,
         "mode": mode,
         "client_ver": local_version,
-        "killers_ship": global_active_ship,
+        "killers_ship": global_active_ship,  # your ship at time of kill
+        "victim_ship": None,
         "damage_type": dmg,
     }
-    hdrs = {
+    headers = {
         "Authorization": f"Bearer {api_key['value']}",
         "Content-Type": "application/json",
     }
     try:
-        r = requests.post(
-            REPORT_KILL_URL,
-            headers=hdrs,
-            json=json_data,
-            timeout=5,
-        )
+        r = requests.post(REPORT_KILL_URL, headers=headers, json=json_data, timeout=5)
         if r.status_code in (200, 201):
+            play_kill_sound()
             logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
         else:
             logger.log(f"❌ Upload failed ({r.status_code})")
@@ -431,11 +444,11 @@ def setup_gui(game_running):
 
     # Add Banner
     try:
-        banner_path = resource_path("3R_Transparent.png")
+        banner_path = resource_path(os.path.join("assets", "3R_Transparent.png"))
         original_image = Image.open(banner_path)
 
         # Resize to 50% of original size (or change to specific size like (600, 150))
-        resized_image = original_image.resize((480, 150), Image.Resampling.LANCZOS)
+        resized_image = original_image.resize((179, 146), Image.Resampling.LANCZOS)
 
         banner_image = ImageTk.PhotoImage(resized_image)
         banner_label = tk.Label(app, image=banner_image, bg="#1a1a1a")
