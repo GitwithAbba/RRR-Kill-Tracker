@@ -283,6 +283,7 @@ def activate_key(key_entry):
 def get_player_name(log_file_location):
     # Retrieve the RSI handle using the existing function
     rsi_handle = find_rsi_handle(log_file_location)
+    find_rsi_geid(log_file_location)
     if not rsi_handle:
         print("Error: RSI handle not found.")
         return None
@@ -307,6 +308,10 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
     killer = parts[12].strip("'")
     weapon = parts[15].strip("'")
     dmg = parts[21].strip("'")
+    victim_ship = None
+    if "_" in killed_zone:
+        # e.g. "DRAK_Corsair_30853" → "DRAK_Corsair"
+        victim_ship = killed_zone.rsplit("_", 1)[0]
 
     mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
@@ -325,6 +330,10 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
             "killers_ship": global_active_ship,  # your ship at time of death
             "victim_ship": global_active_ship,  # same, since *you* are the victim
         }
+
+        # ← INSERT DEBUG LOG HERE:
+        logger.log(f"→ POST payload: {death}")
+
         headers = {
             "Authorization": f"Bearer {api_key['value']}",
             "Content-Type": "application/json",
@@ -343,16 +352,20 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         "player": target,
         "victim": killed,
         "time": kill_time,
-        "zone": global_active_zone,  # the star‐system you’re in
+        "zone": global_active_zone,  # your real map‐zone
         "weapon": weapon,
         "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
         "game_mode": global_game_mode,
         "mode": mode,
         "client_ver": local_version,
         "killers_ship": global_active_ship,  # your ship at time of kill
-        "victim_ship": None,
+        "victim_ship": victim_ship,  # theirs
         "damage_type": dmg,
     }
+
+    # ← INSERT DEBUG LOG HERE:
+    logger.log(f"→ POST payload: {json_data}")
+
     headers = {
         "Authorization": f"Bearer {api_key['value']}",
         "Content-Type": "application/json",
@@ -695,27 +708,36 @@ def start_api_key_countdown(expiration_time: datetime, api_status_label):
 
 
 def read_log_line(line, rsi_name, upload_kills, logger):
-    if -1 != line.find("<Context Establisher Done>"):
+    # 1) Game mode lines
+    if "<Context Establisher Done>" in line:
         set_game_mode(line, logger)
-    elif -1 != line.find(rsi_name):
-        if -1 != line.find("OnEntityEnterZone"):
-            set_player_zone(line, logger)
-        if (
-            -1 != line.find("CActor::Kill")
-            and not check_substring_list(line, ignore_kill_substrings)
-            and upload_kills
-        ):
-            parse_kill_line(line, rsi_name, logger)
-    elif (
-        -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned")
-        and ("SC_Default" != global_game_mode)
-        and (-1 != line.find(global_player_geid))
+
+    # 2) Always track when you ENTER a new map‐zone
+    if "OnEntityEnterZone" in line:
+        set_player_zone(line, logger)
+
+    # 3) Always track when *you* get into a ship
+    if (
+        "CPlayerShipRespawnManager::OnVehicleSpawned" in line
+        and global_game_mode != "SC_Default"
+        and global_player_geid in line
     ):
         set_ac_ship(line, logger)
-    elif (
-        (-1 != line.find("<Vehicle Destruction>"))
-        or (-1 != line.find("<local client>: Entering control state dead"))
-    ) and (-1 != line.find(global_active_ship_id)):
+
+    # 4) If it’s a kill line for *you* (i.e. containing your handle), parse it
+    if (
+        rsi_name in line
+        and "CActor::Kill" in line
+        and not check_substring_list(line, ignore_kill_substrings)
+        and upload_kills
+    ):
+        parse_kill_line(line, rsi_name, logger)
+
+    # 5) If *you* died (vehicle destroyed / client dead) on your active ship
+    if (
+        "<Vehicle Destruction>" in line
+        or "<local client>: Entering control state dead" in line
+    ) and global_active_ship_id in line:
         destroy_player_zone(line, logger)
 
 
@@ -801,6 +823,7 @@ if __name__ == "__main__":
         log_file_location = set_sc_log_location()
         if log_file_location:
             rsi_handle = find_rsi_handle(log_file_location)
+            find_rsi_geid(log_file_location)
             if rsi_handle:
                 start_tail_log_thread(log_file_location, rsi_handle, logger)
 
