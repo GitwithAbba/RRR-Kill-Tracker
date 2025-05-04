@@ -52,6 +52,18 @@ global_ship_list = [
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
+def safe_open(path, mode="r"):
+    """
+    Open text files in UTF-8 and fall back to replacing bad chars
+    rather than crashing on UnicodeDecodeError.
+    Supports read ('r'), write ('w'), append ('a'), etc.
+    """
+    if "w" in mode or "a" in mode:
+        return open(path, mode, encoding="utf-8")
+    # reading modes get error-replace
+    return open(path, mode, encoding="utf-8", errors="replace")
+
+
 def resource_path(rel):
     try:
         base = sys._MEIPASS
@@ -245,7 +257,7 @@ def save_api_key(key: str):
     payload = {"key": key, "expires_at": expires_at}
 
     # write both the key and its expiration to disk
-    with open("killtracker_key.cfg", "w") as f:
+    with safe_open("killtracker_key.cfg", "w") as f:
         json.dump(payload, f)
 
     # store in memory for immediate use
@@ -382,7 +394,7 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
 
 
 def read_existing_log(log_file_location, rsi_name):
-    sc_log = open(log_file_location, "r")
+    sc_log = safe_open(log_file_location, "r")
     lines = sc_log.readlines()
     for line in lines:
         read_log_line(line, rsi_name, True, logger)
@@ -390,7 +402,7 @@ def read_existing_log(log_file_location, rsi_name):
 
 def find_rsi_handle(log_file_location):
     acct_str = "<Legacy login response> [CIG-net] User Login Success"
-    sc_log = open(log_file_location, "r")
+    sc_log = safe_open(log_file_location, "r")
     lines = sc_log.readlines()
     for line in lines:
         if -1 != line.find(acct_str):
@@ -406,7 +418,7 @@ def find_rsi_handle(log_file_location):
 def find_rsi_geid(log_file_location):
     global global_player_geid
     acct_kw = "AccountLoginCharacterStatus_Character"
-    sc_log = open(log_file_location, "r")
+    sc_log = safe_open(log_file_location, "r")
     lines = sc_log.readlines()
     for line in lines:
         if -1 != line.find(acct_kw):
@@ -587,7 +599,7 @@ def setup_gui(game_running):
         # Load Existing Key
         def load_existing_key():
             try:
-                with open("killtracker_key.cfg", "r") as f:
+                with safe_open("killtracker_key.cfg", "r") as f:
                     info = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError):
                 logger.log("No existing key found. Please enter a valid key.")
@@ -744,7 +756,7 @@ def read_log_line(line, rsi_name, upload_kills, logger):
 def tail_log(log_file_location, rsi_name, logger):
     """Read the log file and display events in the GUI."""
     global global_game_mode, global_player_geid
-    sc_log = open(log_file_location, "r")
+    sc_log = safe_open(log_file_location, "r")
     if sc_log is None:
         logger.log(f"No log file found at {log_file_location}.")
         return
@@ -771,7 +783,7 @@ def tail_log(log_file_location, rsi_name, logger):
             sc_log.seek(where)
             if last_log_file_size > os.stat(log_file_location).st_size:
                 sc_log.close()
-                sc_log = open(log_file_location, "r")
+                sc_log = safe_open(log_file_location, "r")
                 last_log_file_size = os.stat(log_file_location).st_size
         else:
             read_log_line(line, rsi_name, True, logger)
