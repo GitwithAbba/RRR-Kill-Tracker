@@ -288,6 +288,12 @@ def get_player_name(log_file_location):
     return rsi_handle
 
 
+# ─── Play sound on kill ──────────────────────────────────────────────────────
+def play_kill_sound():
+    path = resource_path(os.path.join("assets", "kill.wav"))
+    winsound.PlaySound(path, winsound.SND_FILENAME)
+
+
 # ─── Kill parsing & upload ──────────────────────────────────────────────────────
 def parse_kill_line(line: str, target: str, logger: EventLogger):
     if global_game_mode == "EA_FreeFlight" and "Crash" in line:
