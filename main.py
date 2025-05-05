@@ -16,7 +16,8 @@ from PIL import Image, ImageTk
 from datetime import datetime, timedelta
 import json
 import winsound
-
+import re
+from typing import Dict
 from config import BACKEND_URL, API_KEY, VALIDATE_URL, REPORT_KILL_URL, REPORT_DEATH_URL
 
 
@@ -29,6 +30,8 @@ global_active_ship = "N/A"
 global_active_ship_id = "N/A"
 global_player_geid = "N/A"
 global_active_zone = "Unknown"
+# map every actor‑GEID to their last “zone ship” (e.g. “AEGS_Gladius”)
+zone_by_geid: Dict[str, str] = {}
 
 global_ship_list = [
     "DRAK",
@@ -49,6 +52,8 @@ global_ship_list = [
     "TMBL",
     "GAMA",
 ]
+
+SHIP_RX = re.compile(r"([A-Z0-9]+_[A-Za-z0-9]+)_\d+")
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
@@ -134,21 +139,22 @@ def set_player_zone(line: str, logger: EventLogger):
         # if that fails, leave global_active_zone unchanged
         pass
 
-    # 2) *then* fall back to your existing ship‐entity logic:
-    line_index = line.index("-> Entity ") + len("-> Entity ")
-    if line_index == len("-> Entity "):
-        # malformed, clear out
-        global_active_ship = "N/A"
-        global_active_ship_id = "N/A"
-        return
+    # 2) now grab the GEID of whoever just entered that zone,
+    #    and record *their* ship for later lookups:
+    try:
+        geid = line.split("Entity [", 1)[1].split("]")[0]
+        # strip the trailing _ID off our zone name
+        ship_code = zone_str.rsplit("_", 1)[0]
+        zone_by_geid[geid] = ship_code
 
-    potential_zone = line[line_index:].split(" ")[0][1:-1]
-    for x in global_ship_list:
-        if potential_zone.startswith(x):
-            global_active_ship = potential_zone[: potential_zone.rindex("_")]
-            global_active_ship_id = potential_zone[potential_zone.rindex("_") + 1 :]
+        # if it was *you* entering – still update your globals:
+        if geid == global_player_geid:
+            global_active_ship = ship_code
+            global_active_ship_id = zone_str.rsplit("_", 1)[1]
             logger.log(f"🚀 Active Ship: {global_active_ship}")
             return
+    except Exception:
+        pass
 
 
 def check_if_process_running(process_name):
@@ -310,26 +316,35 @@ def play_kill_sound():
 
 # ─── Kill parsing & upload ──────────────────────────────────────────────────────
 def parse_kill_line(line: str, target: str, logger: EventLogger):
+    global global_active_zone, global_active_ship, global_active_ship_id, zone_by_geid
+
     if global_game_mode == "EA_FreeFlight" and "Crash" in line:
         return
 
     parts = line.split(" ")
     kill_time = parts[0].strip("<>")
     killed = parts[5].strip("'")
-    killed_zone = parts[9].strip("'")
+    killed_geid = parts[6].strip("[]")
     killer = parts[12].strip("'")
+    killer_geid = parts[13].strip("[]")
     weapon = parts[15].strip("'")
     dmg = parts[21].strip("'")
-    victim_ship = None
-    if "_" in killed_zone:
-        # e.g. "DRAK_Corsair_30853" → "DRAK_Corsair"
-        victim_ship = killed_zone.rsplit("_", 1)[0]
 
     mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
+    # look up the *other* pilot’s last‑seen ship from our zone_by_geid map
+    # — you killed them → killer is you, their ship = zone_by_geid[killed_geid]
+    # — you died      → killer’s ship   = zone_by_geid[killer_geid]
+    your_ship = global_active_ship or None
+    their_ship = (
+        zone_by_geid.get(killed_geid)
+        if killed == target
+        else zone_by_geid.get(killer_geid)
+    )
+
     # — Death (you got killed) —
     if killed == target and killer.lower() != "unknown":
-        death = {
+        payload = {
             "killer": killer,
             "victim": target,
             "time": kill_time,
@@ -339,12 +354,25 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
             "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
             "game_mode": global_game_mode,
             "mode": mode,
-            "killers_ship": global_active_ship,  # your ship at time of death
-            "victim_ship": global_active_ship,  # same, since *you* are the victim
+            # now pulled from zone_by_geid via killer_geid
+            "killers_ship": zone_by_geid.get(killer_geid) or "N/A",
+            "victim_ship": your_ship or "N/A",
         }
 
         # ← INSERT DEBUG LOG HERE:
-        logger.log(f"→ POST payload: {death}")
+        logger.log(f"→ DEATH payload: {payload}")
+
+        requests.post(
+            f"{BACKEND_URL}/reportDeath",
+            headers={
+                "Authorization": f"Bearer {api_key['value']}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=5,
+        )
+        logger.log("You DIED.")
+        logger.log(f"→ POST payload: {payload}")
 
         headers = {
             "Authorization": f"Bearer {api_key['value']}",
@@ -352,7 +380,7 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         }
         try:
             requests.post(
-                f"{BACKEND_URL}/reportDeath", headers=headers, json=death, timeout=5
+                f"{BACKEND_URL}/reportDeath", headers=headers, json=payload, timeout=5
             )
         except Exception as e:
             logger.log(f"❌ Failed to report death: {e}")
@@ -360,7 +388,7 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         return
 
     # — Kill (you killed someone else) —
-    json_data = {
+    payload = {
         "player": target,
         "victim": killed,
         "time": kill_time,
@@ -370,20 +398,29 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         "game_mode": global_game_mode,
         "mode": mode,
         "client_ver": local_version,
-        "killers_ship": global_active_ship,  # your ship at time of kill
-        "victim_ship": victim_ship,  # theirs
+        "killers_ship": your_ship or "N/A",
+        "victim_ship": zone_by_geid.get(killed_geid) or "N/A",
         "damage_type": dmg,
     }
 
     # ← INSERT DEBUG LOG HERE:
-    logger.log(f"→ POST payload: {json_data}")
+    logger.log(f"→ KILL payload: {payload}")
+    requests.post(
+        f"{BACKEND_URL}/reportKill",
+        headers={
+            "Authorization": f"Bearer {api_key['value']}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=5,
+    )
 
     headers = {
         "Authorization": f"Bearer {api_key['value']}",
         "Content-Type": "application/json",
     }
     try:
-        r = requests.post(REPORT_KILL_URL, headers=headers, json=json_data, timeout=5)
+        r = requests.post(REPORT_KILL_URL, headers=headers, json=payload, timeout=5)
         if r.status_code in (200, 201):
             play_kill_sound()
             logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
