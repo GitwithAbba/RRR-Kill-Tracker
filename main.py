@@ -332,15 +332,20 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
 
     mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
 
-    # look up the *other* pilot’s last‑seen ship from our zone_by_geid map
-    # — you killed them → killer is you, their ship = zone_by_geid[killed_geid]
-    # — you died      → killer’s ship   = zone_by_geid[killer_geid]
-    your_ship = global_active_ship or None
-    their_ship = (
-        zone_by_geid.get(killed_geid)
-        if killed == target
-        else zone_by_geid.get(killer_geid)
-    )
+    # ─── Extract zone & victim‐ship directly from the kill‐line ─────────────────
+    zm = re.search(r"in zone '([^']+)'", line)
+    zone_full = zm.group(1) if zm else None
+    # strip off the trailing _ID
+    zone_name = zone_full.rsplit("_", 1)[0] if zone_full else "Unknown"
+    victim_ship = zone_name
+
+    # your ship is always global_active_ship
+    killers_ship = global_active_ship or "N/A"
+    # if it’s *your* death, swap roles:
+    if killed == target:
+        your_ship = victim_ship
+        killers_ship = zone_by_geid.get(killer_geid) or "N/A"
+    # ─────────────────────────────────────────────────────────────────────────
 
     # — Death (you got killed) —
     if killed == target and killer.lower() != "unknown":
@@ -348,15 +353,15 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
             "killer": killer,
             "victim": target,
             "time": kill_time,
-            "zone": global_active_zone,  # use the parsed zone
+            "zone": zone_name,
             "weapon": weapon,
             "damage_type": dmg,
             "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
             "game_mode": global_game_mode,
             "mode": mode,
             # now pulled from zone_by_geid via killer_geid
-            "killers_ship": zone_by_geid.get(killer_geid) or "N/A",
-            "victim_ship": your_ship or "N/A",
+            "killers_ship": killers_ship,
+            "victim_ship": your_ship,
         }
 
         # ← INSERT DEBUG LOG HERE:
@@ -392,14 +397,14 @@ def parse_kill_line(line: str, target: str, logger: EventLogger):
         "player": target,
         "victim": killed,
         "time": kill_time,
-        "zone": global_active_zone,  # your real map‐zone
+        "zone": zone_name,
         "weapon": weapon,
         "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
         "game_mode": global_game_mode,
         "mode": mode,
         "client_ver": local_version,
-        "killers_ship": your_ship or "N/A",
-        "victim_ship": zone_by_geid.get(killed_geid) or "N/A",
+        "killers_ship": killers_ship,
+        "victim_ship": victim_ship,
         "damage_type": dmg,
     }
 
