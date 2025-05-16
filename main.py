@@ -14,11 +14,20 @@ import time
 import datetime
 from PIL import Image, ImageTk
 from datetime import datetime, timedelta
-import json
-import winsound
 import re
 from typing import Dict
 from config import BACKEND_URL, API_KEY, VALIDATE_URL, REPORT_KILL_URL, REPORT_DEATH_URL
+from log_parser import LogParser
+from api_client import APIClient
+from helpers import play_kill_sound, resource_path
+
+
+class NullCM:
+    def post_heartbeat_enter_ship_event(self, ship):
+        pass
+
+    def post_heartbeat_death_event(self, player, zone):
+        pass
 
 
 # ─── Version & globals ──────────────────────────────────────────────────────────
@@ -30,8 +39,7 @@ global_active_ship = "N/A"
 global_active_ship_id = "N/A"
 global_player_geid = "N/A"
 global_active_zone = "Unknown"
-# map every actor‑GEID to their last “zone ship” (e.g. “AEGS_Gladius”)
-zone_by_geid: Dict[str, str] = {}
+
 
 global_ship_list = [
     "DRAK",
@@ -54,9 +62,49 @@ global_ship_list = [
 ]
 
 SHIP_RX = re.compile(r"([A-Z0-9]+_[A-Za-z0-9]+)_\d+")
+ON_SPAWN_RX = re.compile(r"OnVehicleSpawned.*?\(([^)]+)\)\s*by player\s*(\d+)")
+
+
+def is_game_running():
+    return check_if_process_running("StarCitizen") is not None
+
+
+class CMClient:
+    def post_heartbeat_enter_ship_event(self, ship):
+        # TODO: hook into your existing “enter‐ship” heartbeat
+        pass
+
+    def post_heartbeat_death_event(self, player, zone):
+        # TODO: hook into your existing “death” heartbeat
+        pass
+
+
+cm = CMClient()
+# ──────────────────────────────────────────────────────────────────────────
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
+def find_rsi_handle(log_file_location):
+    acct_str = "<Legacy login response> [CIG-net] User Login Success"
+    with open(log_file_location, "r", encoding="utf-8", errors="replace") as sc_log:
+        for line in sc_log:
+            if acct_str in line:
+                idx = line.index("Handle[") + len("Handle[")
+                return line[idx:].split(" ")[0].rstrip("]")
+    return None
+
+
+def find_rsi_geid(log_file_location):
+    global global_player_geid
+    acct_kw = "AccountLoginCharacterStatus_Character"
+    with open(log_file_location, "r", encoding="utf-8", errors="replace") as sc_log:
+        for line in sc_log:
+            if acct_kw in line:
+                global_player_geid = line.split(" ")[11]
+                return global_player_geid
+    return None
+
+
 def safe_open(path, mode="r"):
     """
     Open text files in UTF-8 and fall back to replacing bad chars
@@ -102,59 +150,28 @@ class EventLogger:
         self.w.config(state=tk.DISABLED)
         self.w.see(tk.END)
 
+    # alias the other levels back to .log()
+    def debug(self, m):
+        self.log(f"[DEBUG] {m}")
+
+    def info(self, m):
+        self.log(f"[INFO] {m}")
+
+    def warning(self, m):
+        self.log(f"[WARNING] {m}")
+
+    def error(self, m):
+        self.log(f"[ERROR] {m}")
+
+    def success(self, m):
+        self.log(f"[SUCCESS] {m}")
+
 
 def show_loading_animation(logger, app):
     for dots in [".", "..", "..."]:
         logger.log(dots)
         app.update_idletasks()
         time.sleep(0.2)
-
-
-def destroy_player_zone(line, logger):
-    global global_active_ship
-    global global_active_ship_id
-    if ("N/A" != global_active_ship) or ("N/A" != global_active_ship_id):
-        print(f"Ship Destroyed: {global_active_ship} with ID: {global_active_ship_id}")
-        global_active_ship = "N/A"
-        global_active_ship_id = "N/A"
-
-
-def set_ac_ship(line, logger):
-    global global_active_ship
-    global_active_ship = line.split(" ")[5][1:-1]
-    print("Player has entered ship: ", global_active_ship)
-
-
-# ─── Zone & ship parsing ────────────────────────────────────────────────────────
-def set_player_zone(line: str, logger: EventLogger):
-    global global_active_zone, global_active_ship, global_active_ship_id
-
-    # 1) pull out the *real* map‐zone
-    try:
-        # log lines look like "...OnEntityEnterZone -> Zone ['OOC_Stanton_1b_Aberdeen']..."
-        zone_str = line.split("-> Zone ")[1].split(" ")[0].strip("[]\"'")
-        global_active_zone = zone_str
-        logger.log(f"🌐 Entered Zone: {global_active_zone}")
-    except Exception:
-        # if that fails, leave global_active_zone unchanged
-        pass
-
-    # 2) now grab the GEID of whoever just entered that zone,
-    #    and record *their* ship for later lookups:
-    try:
-        geid = line.split("Entity [", 1)[1].split("]")[0]
-        # strip the trailing _ID off our zone name
-        ship_code = zone_str.rsplit("_", 1)[0]
-        zone_by_geid[geid] = ship_code
-
-        # if it was *you* entering – still update your globals:
-        if geid == global_player_geid:
-            global_active_ship = ship_code
-            global_active_ship_id = zone_str.rsplit("_", 1)[1]
-            logger.log(f"🚀 Active Ship: {global_active_ship}")
-            return
-    except Exception:
-        pass
 
 
 def check_if_process_running(process_name):
@@ -309,178 +326,12 @@ def get_player_name(log_file_location):
 
 
 # ─── Play sound on kill ──────────────────────────────────────────────────────
-def play_kill_sound():
-    path = resource_path(os.path.join("assets", "kill.wav"))
-    winsound.PlaySound(path, winsound.SND_FILENAME)
+class SoundsAdapter:
+    def __init__(self, logger):
+        self.log = logger
 
-
-# ─── Kill parsing & upload ──────────────────────────────────────────────────────
-def parse_kill_line(line: str, target: str, logger: EventLogger):
-    global global_active_zone, global_active_ship, global_active_ship_id, zone_by_geid
-
-    if global_game_mode == "EA_FreeFlight" and "Crash" in line:
-        return
-
-    parts = line.split(" ")
-    kill_time = parts[0].strip("<>")
-    killed = parts[5].strip("'")
-    killed_geid = parts[6].strip("[]")
-    killer = parts[12].strip("'")
-    killer_geid = parts[13].strip("[]")
-    weapon = parts[15].strip("'")
-    dmg = parts[21].strip("'")
-
-    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
-
-    # ─── Extract zone & victim‐ship directly from the kill‐line ─────────────────
-    zm = re.search(r"in zone '([^']+)'", line)
-    zone_full = zm.group(1) if zm else None
-    # strip off the trailing _ID
-    zone_name = zone_full.rsplit("_", 1)[0] if zone_full else "Unknown"
-    victim_ship = zone_name
-
-    # your ship is always global_active_ship
-    killers_ship = global_active_ship or "N/A"
-    # if it’s *your* death, swap roles:
-    if killed == target:
-        your_ship = victim_ship
-        killers_ship = zone_by_geid.get(killer_geid) or "N/A"
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # — Death (you got killed) —
-    if killed == target and killer.lower() != "unknown":
-        payload = {
-            "killer": killer,
-            "victim": target,
-            "time": kill_time,
-            "zone": zone_name,
-            "weapon": weapon,
-            "damage_type": dmg,
-            "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
-            "game_mode": global_game_mode,
-            "mode": mode,
-            # now pulled from zone_by_geid via killer_geid
-            "killers_ship": killers_ship,
-            "victim_ship": your_ship,
-        }
-
-        # ← INSERT DEBUG LOG HERE:
-        logger.log(f"→ DEATH payload: {payload}")
-
-        requests.post(
-            f"{BACKEND_URL}/reportDeath",
-            headers={
-                "Authorization": f"Bearer {api_key['value']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=5,
-        )
-        logger.log("You DIED.")
-        logger.log(f"→ POST payload: {payload}")
-
-        headers = {
-            "Authorization": f"Bearer {api_key['value']}",
-            "Content-Type": "application/json",
-        }
-        try:
-            requests.post(
-                f"{BACKEND_URL}/reportDeath", headers=headers, json=payload, timeout=5
-            )
-        except Exception as e:
-            logger.log(f"❌ Failed to report death: {e}")
-        logger.log("You DIED.")
-        return
-
-    # — Kill (you killed someone else) —
-    payload = {
-        "player": target,
-        "victim": killed,
-        "time": kill_time,
-        "zone": zone_name,
-        "weapon": weapon,
-        "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
-        "game_mode": global_game_mode,
-        "mode": mode,
-        "client_ver": local_version,
-        "killers_ship": killers_ship,
-        "victim_ship": victim_ship,
-        "damage_type": dmg,
-    }
-
-    # ← INSERT DEBUG LOG HERE:
-    logger.log(f"→ KILL payload: {payload}")
-    requests.post(
-        f"{BACKEND_URL}/reportKill",
-        headers={
-            "Authorization": f"Bearer {api_key['value']}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=5,
-    )
-
-    headers = {
-        "Authorization": f"Bearer {api_key['value']}",
-        "Content-Type": "application/json",
-    }
-    try:
-        r = requests.post(REPORT_KILL_URL, headers=headers, json=payload, timeout=5)
-        if r.status_code in (200, 201):
-            play_kill_sound()
-            logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
-        else:
-            logger.log(f"❌ Upload failed ({r.status_code})")
-    except Exception as e:
-        logger.log(f"Error sending kill: {e}")
-
-
-def read_existing_log(log_file_location, rsi_name):
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        read_log_line(line, rsi_name, True, logger)
-
-
-def find_rsi_handle(log_file_location):
-    acct_str = "<Legacy login response> [CIG-net] User Login Success"
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        if -1 != line.find(acct_str):
-            line_index = line.index("Handle[") + len("Handle[")
-            if 0 == line_index:
-                print("RSI_HANDLE: Not Found!")
-                exit()
-            potential_handle = line[line_index:].split(" ")[0]
-            return potential_handle[0:-1]
-    return None
-
-
-def find_rsi_geid(log_file_location):
-    global global_player_geid
-    acct_kw = "AccountLoginCharacterStatus_Character"
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        if -1 != line.find(acct_kw):
-            global_player_geid = line.split(" ")[11]
-            print("Player geid: " + global_player_geid)
-            return
-
-
-def set_game_mode(line, logger):
-    global global_game_mode
-    global global_active_ship
-    global global_active_ship_id
-    split_line = line.split(" ")
-    game_mode = split_line[8].split("=")[1].strip('"')
-    if game_mode != global_game_mode:
-        global_game_mode = game_mode
-
-    if "SC_Default" == global_game_mode:
-        global_active_ship = "N/A"
-        global_active_ship_id = "N/A"
+    def play_random_sound(self):
+        play_kill_sound()
 
 
 def setup_gui(game_running):
@@ -492,7 +343,7 @@ def setup_gui(game_running):
 
     try:
         font_path = resource_path("Orbitron.ttf")
-        custom_font = tkFont.Font(file=font_path, size=12)
+        custom_font = tkFont.Font(family="Orbitron", size=12)
         app.option_add("*Font", custom_font)
     except Exception as e:
         print(f"Failed to load custom font: {e}")
@@ -761,130 +612,41 @@ def start_api_key_countdown(expiration_time: datetime, api_status_label):
     countdown()
 
 
-def read_log_line(line, rsi_name, upload_kills, logger):
-    # 1) Game mode lines
-    if "<Context Establisher Done>" in line:
-        set_game_mode(line, logger)
+if __name__ == "__main__":
+    # 1) launch GUI & get logger
+    app, logger = setup_gui(is_game_running())
 
-    # 2) Always track when you ENTER a new map‐zone
-    if "OnEntityEnterZone" in line:
-        set_player_zone(line, logger)
-
-    # 3) Always track when *you* get into a ship
-    if (
-        "CPlayerShipRespawnManager::OnVehicleSpawned" in line
-        and global_game_mode != "SC_Default"
-        and global_player_geid in line
-    ):
-        set_ac_ship(line, logger)
-
-    # 4) If it’s a kill line for *you* (i.e. containing your handle), parse it
-    if (
-        rsi_name in line
-        and "CActor::Kill" in line
-        and not check_substring_list(line, ignore_kill_substrings)
-        and upload_kills
-    ):
-        parse_kill_line(line, rsi_name, logger)
-
-    # 5) If *you* died (vehicle destroyed / client dead) on your active ship
-    if (
-        "<Vehicle Destruction>" in line
-        or "<local client>: Entering control state dead" in line
-    ) and global_active_ship_id in line:
-        destroy_player_zone(line, logger)
-
-
-def tail_log(log_file_location, rsi_name, logger):
-    """Read the log file and display events in the GUI."""
-    global global_game_mode, global_player_geid
-    sc_log = safe_open(log_file_location, "r")
-    if sc_log is None:
-        logger.log(f"No log file found at {log_file_location}.")
-        return
-
-    logger.log("Kill Tracking Initiated...")
-    logger.log("Enter key to establish Servitor connection...")
-
-    # Read all lines to find out what game mode player is currently, in case they booted up late.
-    # Don't upload kills, we don't want repeating last sessions kills incase they are actually available.
-    lines = sc_log.readlines()
-    print(
-        "Loading old log (if available)! Kills shown will not be uploaded as they are stale."
-    )
-    for line in lines:
-        read_log_line(line, rsi_name, False, logger)
-
-    # Main loop to monitor the log
-    last_log_file_size = os.stat(log_file_location).st_size
-    while True:
-        where = sc_log.tell()
-        line = sc_log.readline()
-        if not line:
-            time.sleep(1)
-            sc_log.seek(where)
-            if last_log_file_size > os.stat(log_file_location).st_size:
-                sc_log.close()
-                sc_log = safe_open(log_file_location, "r")
-                last_log_file_size = os.stat(log_file_location).st_size
-        else:
-            read_log_line(line, rsi_name, True, logger)
-
-
-def start_tail_log_thread(log_file_location, rsi_name, logger):
-    """Start the log tailing in a separate thread."""
-    thread = threading.Thread(
-        target=tail_log, args=(log_file_location, rsi_name, logger)
-    )
-    thread.daemon = True
-    thread.start()
-
-
-def is_game_running():
-    """Check if Star Citizen is running."""
-    return check_if_process_running("StarCitizen") is not None
-
-
-def auto_shutdown(app, delay_in_seconds, logger=None):
-    def shutdown():
-        time.sleep(delay_in_seconds)
-        if logger:
-            logger.log(
-                "Application has been open for 72 hours. Shutting down in 60 seconds."
-            )
-        else:
-            print(
-                "Application has been open for 72 hours. Shutting down in 60 seconds."
-            )
-
-        time.sleep(60)
-
-        app.quit()
+    # 2) find the SC log file
+    log_file_location = set_sc_log_location()
+    if not log_file_location:
+        app.mainloop()
         sys.exit(0)
 
-    # Run the shutdown logic in a separate thread
-    shutdown_thread = threading.Thread(target=shutdown, daemon=True)
-    shutdown_thread.start()
+    # 3) grab your RSI handle & GEID
+    rsi_handle = find_rsi_handle(log_file_location)
+    find_rsi_geid(log_file_location)
+    player_geid = global_player_geid
 
+    # 4) wire up support modules
+    api = APIClient(api_key)
+    sounds = SoundsAdapter(logger)  # <— only here, after logger exists
+    cm = NullCM()
 
-if __name__ == "__main__":
-    game_running = is_game_running()
-
-    app, logger = setup_gui(game_running)
-
-    if game_running:
-        # Start log monitoring in a separate thread
-        log_file_location = set_sc_log_location()
-        if log_file_location:
-            rsi_handle = find_rsi_handle(log_file_location)
-            find_rsi_geid(log_file_location)
-            if rsi_handle:
-                start_tail_log_thread(log_file_location, rsi_handle, logger)
-
-    # Initiate auto-shutdown after 72 hours (72 * 60 * 60 seconds)
-    if logger:
-        auto_shutdown(app, 72 * 60 * 60, logger)  # Pass logger only if initialized
-    else:
-        auto_shutdown(app, 72 * 60 * 60)  # Fallback without logger
+    # 5) start the unified LogParser
+    monitoring = {"active": True}
+    parser = LogParser(
+        gui_module=logger,
+        api_client_module=api,
+        sound_module=sounds,
+        cm_module=cm,
+        local_version=local_version,
+        monitoring=monitoring,
+        rsi_handle={"current": rsi_handle},
+        player_geid={"current": player_geid},
+        active_ship={"current": global_active_ship},
+        anonymize_state=False,
+    )
+    parser.log_file_location = log_file_location
+    parser.start_tail_log_thread()
 
     app.mainloop()
