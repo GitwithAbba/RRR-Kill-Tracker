@@ -149,10 +149,15 @@ class LogParser:
         if line.find("<Context Establisher Done>") != -1:
             self.set_game_mode(line)
             self.log.debug(f"read_log_line(): set_game_mode with: {line}.")
+        # 2) catch *every* zone-enter and set active_ship (this fires when you board your AC ship)
+        elif "OnEntityEnterZone" in line:
+            self.log.debug(f"read_log_line(): set_player_zone with: {line}.")
+            self.set_player_zone(line, False)
+        # 3) your spawn logic — only use the respawn manager when *you* spawn
         elif (
-            line.find("CPlayerShipRespawnManager::OnVehicleSpawned") != -1
+            "CPlayerShipRespawnManager::OnVehicleSpawned" in line
             and self.game_mode != "SC_Default"
-            and line.find(self.player_geid["current"]) != -1
+            and self.player_geid["current"] in line
         ):
             self.set_ac_ship(line)
             self.log.debug(f"read_log_line(): set_ac_ship with: {line}.")
@@ -164,16 +169,12 @@ class LogParser:
             self.log.debug(f"read_log_line(): destroy_player_zone with: {line}")
             self.destroy_player_zone()
         elif line.find(self.rsi_handle["current"]) != -1:
-            # NOTE: OnEntityEnterZone not current in logs
-            if line.find("OnEntityEnterZone") != -1:
-                # Send change ship event to the server via heartbeat
-                self.log.debug(f"read_log_line(): set_player_zone with: {line}.")
-                self.set_player_zone(line, False)
             if (
                 line.find("CActor::Kill") != -1
                 and not self.check_substring_list(line, self.ignore_kill_substrings)
                 and upload_kills
             ):
+                self.log.debug(f"Pre-kill active ship: {self.active_ship['current']}")
                 kill_result = self.parse_kill_line(line, self.rsi_handle["current"])
                 self.log.debug(f"read_log_line(): kill_result with: {line}.")
                 if kill_result["result"] in ("exclusion", "reset"):
@@ -308,7 +309,7 @@ class LogParser:
                 data_zone = "N/A"
             else:
                 # not a ship → no victim ship, real location
-                victim_ship = "N/A"
+                ##victim_ship = "N/A"
                 data_zone = killed_zone
 
             # ─── decide result and shape data ────────────────────────────────
@@ -328,7 +329,7 @@ class LogParser:
                         "killer": killer,
                         "victim": curr_user,
                         "time": kill_time,
-                        "zone": data_zone,
+                        "zone": killed_zone,
                         "weapon": weapon,
                         "damage_type": damage,
                         "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
