@@ -1,6 +1,7 @@
 from time import sleep
 from os import stat
 from threading import Thread
+import re
 
 
 class LogParser:
@@ -145,56 +146,56 @@ class LogParser:
         self.log.info("Game log monitoring has stopped.")
 
     def read_log_line(self, line: str, upload_kills: bool) -> None:
-        """Event checking logic. Look for substrings, do stuff based on what we find."""
-        if line.find("<Context Establisher Done>") != -1:
+        # 1) game-mode
+        if "<Context Establisher Done>" in line:
             self.set_game_mode(line)
-            self.log.debug(f"read_log_line(): set_game_mode with: {line}.")
-        # 2) catch *every* zone-enter and set active_ship (this fires when you board your AC ship)
+            self.log.debug(f"set_game_mode: {line}")
+
+        # 2) any zone–enter (this fires whenever you board a ship)
         elif "OnEntityEnterZone" in line:
-            self.log.debug(f"read_log_line(): set_player_zone with: {line}.")
+            self.log.debug(f"set_player_zone (zone enter): {line}")
             self.set_player_zone(line, False)
-        # 3) your spawn logic — only use the respawn manager when *you* spawn
+
+        # 3) only *you* spawning into a ship
         elif (
             "CPlayerShipRespawnManager::OnVehicleSpawned" in line
             and self.game_mode != "SC_Default"
             and self.player_geid["current"] in line
         ):
             self.set_ac_ship(line)
-            self.log.debug(f"read_log_line(): set_ac_ship with: {line}.")
-        elif (
-            line.find("<Vehicle Destruction>") != -1
-            or line.find("<local client>: Entering control state dead") != -1
-        ) and line.find(self.active_ship_id) != -1:
-            # Send ship destroy event to the server via heartbeat
-            self.log.debug(f"read_log_line(): destroy_player_zone with: {line}")
-            self.destroy_player_zone()
-        elif line.find(self.rsi_handle["current"]) != -1:
+            self.log.debug(f"set_ac_ship: {line}")
+
+        # 4) your handle in the line → could be a kill or your death
+        elif self.rsi_handle["current"] in line:
+            # 4a) right before a kill you might hop zones again
+            if "OnEntityEnterZone" in line:
+                self.set_player_zone(line, False)
+                self.log.debug(f"set_player_zone pre-kill: {line}")
+
+            # 4b) now parse a kill line
             if (
-                line.find("CActor::Kill") != -1
+                "CActor::Kill" in line
                 and not self.check_substring_list(line, self.ignore_kill_substrings)
                 and upload_kills
             ):
-                self.log.debug(f"Pre-kill active ship: {self.active_ship['current']}")
-                kill_result = self.parse_kill_line(line, self.rsi_handle["current"])
-                self.log.debug(f"read_log_line(): kill_result with: {line}.")
-                if kill_result["result"] in ("exclusion", "reset"):
-                    self.log.debug(
-                        f"read_log_line(): Not posting {kill_result['result']} death: {line}."
-                    )
+                self.log.debug(f"Pre-kill active_ship: {self.active_ship['current']}")
+                kr = self.parse_kill_line(line, self.rsi_handle["current"])
+
+                if kr["result"] in ("exclusion", "reset"):
                     return
-                # simplified: just report death or kill
-                if kill_result["result"] in ("killed", "suicide"):
-                    # you died
-                    self.api.post_death_event(kill_result["data"])
+                if kr["result"] in ("killed", "suicide"):
+                    self.api.post_death_event(kr["data"])
                     self.destroy_player_zone()
-                elif kill_result["result"] == "killer":
-                    # you killed someone
+                elif kr["result"] == "killer":
+                    # here kr["data"]["killers_ship"] was already set to self.active_ship in parse_kill_line
                     self.sounds.play_random_sound()
-                    self.api.post_kill_event(kill_result)
+                    self.api.post_kill_event(kr)
                 else:
                     self.log.log(f"Kill failed to parse: {line}")
-        elif line.find("<Jump Drive State Changed>") != -1:
-            self.log.debug(f"read_log_line(): set_player_zone with: {line}.")
+
+        # 5) jump-drive events still update your zone exactly as before
+        elif "<Jump Drive State Changed>" in line:
+            self.log.debug(f"set_player_zone (JumpDrive): {line}")
             self.set_player_zone(line, True)
             ## WILL POSSIBLY USE LATER
             ##if kill_result["result"] in ("killed", "suicide"):
