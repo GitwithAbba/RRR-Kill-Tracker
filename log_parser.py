@@ -145,58 +145,55 @@ class LogParser:
                 self.log.log(f"Error reading game log file: {e.__class__.__name__} {e}")
         self.log.info("Game log monitoring has stopped.")
 
-    def read_log_line(self, line: str, upload_kills: bool) -> None:
-        # 1) game-mode
+    def read_log_line(self, line: str, upload_kills: bool):
+        # 0) always refresh game-mode
         if "<Context Establisher Done>" in line:
             self.set_game_mode(line)
-            self.log.debug(f"set_game_mode: {line}")
 
-        # 2) any zone–enter (this fires whenever you board a ship)
-        elif "OnEntityEnterZone" in line:
-            self.log.debug(f"set_player_zone (zone enter): {line}")
-            self.set_player_zone(line, False)
+        # 1) zone-enter (AC & PU)
+        if "OnEntityEnterZone" in line:
+            self.set_player_zone(line, use_jd=False)
 
-        # 3) only *you* spawning into a ship
-        elif (
+        # 2) JumpDrive enter (AC FreeFlight ships)
+        if "<Jump Drive State Changed>" in line:
+            self.set_player_zone(line, use_jd=True)
+
+        # 3) direct respawn hook (some AC modes)
+        if (
             "CPlayerShipRespawnManager::OnVehicleSpawned" in line
             and self.game_mode != "SC_Default"
             and self.player_geid["current"] in line
         ):
             self.set_ac_ship(line)
-            self.log.debug(f"set_ac_ship: {line}")
 
-        # 4) your handle in the line → could be a kill or your death
-        elif self.rsi_handle["current"] in line:
-            # 4a) right before a kill you might hop zones again
-            if "OnEntityEnterZone" in line:
-                self.set_player_zone(line, False)
-                self.log.debug(f"set_player_zone pre-kill: {line}")
+        # 4) destruction = you died → clear out
+        if (
+            "<Vehicle Destruction>" in line
+            or "<local client>: Entering control state dead" in line
+        ) and self.active_ship_id in line:
+            self.destroy_player_zone()
 
-            # 4b) now parse a kill line
-            if (
-                "CActor::Kill" in line
-                and not self.check_substring_list(line, self.ignore_kill_substrings)
-                and upload_kills
-            ):
-                self.log.debug(f"Pre-kill active_ship: {self.active_ship['current']}")
-                kr = self.parse_kill_line(line, self.rsi_handle["current"])
-
-                if kr["result"] in ("exclusion", "reset"):
-                    return
-                if kr["result"] in ("killed", "suicide"):
-                    self.api.post_death_event(kr["data"])
-                    self.destroy_player_zone()
-                elif kr["result"] == "killer":
-                    # here kr["data"]["killers_ship"] was already set to self.active_ship in parse_kill_line
-                    self.sounds.play_random_sound()
-                    self.api.post_kill_event(kr)
-                else:
-                    self.log.log(f"Kill failed to parse: {line}")
-
-        # 5) jump-drive events still update your zone exactly as before
-        elif "<Jump Drive State Changed>" in line:
-            self.log.debug(f"set_player_zone (JumpDrive): {line}")
-            self.set_player_zone(line, True)
+        # 5) finally, if it’s a kill line for you, send it
+        if (
+            upload_kills
+            and self.rsi_handle["current"] in line
+            and "CActor::Kill" in line
+        ):
+            self.log.debug(
+                f"→ kill fired; active_ship is '{self.active_ship['current']}'"
+            )
+            kr = self.parse_kill_line(line, self.rsi_handle["current"])
+            if kr["result"] == "killer":
+                # overwrite just in case:
+                kr["data"]["killers_ship"] = self.active_ship["current"]
+                self.log.debug(
+                    f"→ sending kill with ship = {kr['data']['killers_ship']}"
+                )
+                self.sounds.play_random_sound()
+                self.api.post_kill_event(kr)
+            elif kr["result"] in ("killed", "suicide"):
+                self.api.post_death_event(kr["data"])
+                self.destroy_player_zone()
             ## WILL POSSIBLY USE LATER
             ##if kill_result["result"] in ("killed", "suicide"):
             ##self.curr_killstreak = 0
@@ -285,12 +282,11 @@ class LogParser:
         return True
 
     def parse_kill_line(self, line: str, curr_user: str):
-        ##Parse kill event.
         try:
             if not self.check_exclusion_scenarios(line):
                 return {"result": "exclusion", "data": None}
 
-            # ─── split out time, actors, ships, damage ────────────────────────
+            # 1) split out time, actors, ships, damage
             parts = line.split(" ")
             kill_time = parts[0].strip("<>")
             killed = parts[5].strip("'")
@@ -300,20 +296,19 @@ class LogParser:
             weapon = parts[15].strip("'")
             damage = parts[21].strip("'")
 
-            # ─── build common fields ────────────────────────────────────────
+            # 2) build common fields
             rsi_profile = f"https://robertsspaceindustries.com/citizens/{killed}"
-            # decide if killed_zone is actually a ship or a real location
-            is_ship = any(killed_zone.startswith(s) for s in self.global_ship_list)
-            if is_ship:
-                # zone was a ship code
+
+            # 3) default both variables
+            victim_ship = "N/A"
+            data_zone = killed_zone
+
+            # 4) if it really is a ship code, override the defaults
+            if any(killed_zone.startswith(s) for s in self.global_ship_list):
                 victim_ship = killed_zone.rsplit("_", 1)[0]
                 data_zone = "N/A"
-            else:
-                # not a ship → no victim ship, real location
-                ##victim_ship = "N/A"
-                data_zone = killed_zone
 
-            # ─── decide result and shape data ────────────────────────────────
+            # 4) decide which kind of event it is
             if killed == killer:
                 return {
                     "result": "suicide",
@@ -323,6 +318,7 @@ class LogParser:
                         "zone": killed_zone,
                     },
                 }
+
             elif killed == curr_user:
                 return {
                     "result": "killed",
@@ -342,9 +338,17 @@ class LogParser:
                         "victim_ship": victim_ship,
                     },
                 }
+
             elif killer.lower() == "unknown":
                 return {"result": "reset", "data": {}}
+
             else:
+                # 5) it’s a kill you made — pick your ship unless you’re in FPS mode
+                if self.game_mode.startswith("EA_FPS"):
+                    killers_ship = "N/A"
+                else:
+                    killers_ship = self.active_ship["current"]
+
                 return {
                     "result": "killer",
                     "data": {
@@ -360,7 +364,7 @@ class LogParser:
                             "ac-kill" if self.game_mode.startswith("EA_") else "pu-kill"
                         ),
                         "client_ver": self.local_version,
-                        "killers_ship": self.active_ship["current"],
+                        "killers_ship": killers_ship,
                         "victim_ship": victim_ship,
                         "anonymize_state": self.anonymize_state,
                     },
