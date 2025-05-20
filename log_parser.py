@@ -282,6 +282,11 @@ class LogParser:
         return True
 
     def parse_kill_line(self, line: str, curr_user: str):
+        # 0) filter out any NPC‐type kill/death
+        if any(
+            substr.lower() in line.lower() for substr in self.ignore_kill_substrings
+        ):
+            return {"result": "exclusion", "data": None}
         try:
             if not self.check_exclusion_scenarios(line):
                 return {"result": "exclusion", "data": None}
