@@ -14,9 +14,20 @@ import time
 import datetime
 from PIL import Image, ImageTk
 from datetime import datetime, timedelta
-import json
-
+import re
+from typing import Dict
 from config import BACKEND_URL, API_KEY, VALIDATE_URL, REPORT_KILL_URL, REPORT_DEATH_URL
+from log_parser import LogParser
+from api_client import APIClient
+from helpers import play_kill_sound, resource_path
+
+
+class NullCM:
+    def post_heartbeat_enter_ship_event(self, ship):
+        pass
+
+    def post_heartbeat_death_event(self, player, zone):
+        pass
 
 
 # ─── Version & globals ──────────────────────────────────────────────────────────
@@ -27,6 +38,8 @@ global_game_mode = "Nothing"
 global_active_ship = "N/A"
 global_active_ship_id = "N/A"
 global_player_geid = "N/A"
+global_active_zone = "Unknown"
+
 
 global_ship_list = [
     "DRAK",
@@ -48,6 +61,27 @@ global_ship_list = [
     "GAMA",
 ]
 
+SHIP_RX = re.compile(r"([A-Z0-9]+_[A-Za-z0-9]+)_\d+")
+ON_SPAWN_RX = re.compile(r"OnVehicleSpawned.*?\(([^)]+)\)\s*by player\s*(\d+)")
+
+
+def is_game_running():
+    return check_if_process_running("StarCitizen") is not None
+
+
+class CMClient:
+    def post_heartbeat_enter_ship_event(self, ship):
+        # TODO: hook into your existing “enter‐ship” heartbeat
+        pass
+
+    def post_heartbeat_death_event(self, player, zone):
+        # TODO: hook into your existing “death” heartbeat
+        pass
+
+
+cm = CMClient()
+# ──────────────────────────────────────────────────────────────────────────
+
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 def safe_open(path, mode="r"):
@@ -60,6 +94,27 @@ def safe_open(path, mode="r"):
         return open(path, mode, encoding="utf-8")
     # reading modes get error-replace
     return open(path, mode, encoding="utf-8", errors="replace")
+
+
+def find_rsi_handle(log_file_location):
+    acct_str = "<Legacy login response> [CIG-net] User Login Success"
+    with safe_open(log_file_location, "r") as sc_log:
+        for line in sc_log:
+            if acct_str in line:
+                idx = line.index("Handle[") + len("Handle[")
+                return line[idx:].split(" ")[0].rstrip("]")
+    return None
+
+
+def find_rsi_geid(log_file_location):
+    global global_player_geid
+    acct_kw = "AccountLoginCharacterStatus_Character"
+    with safe_open(log_file_location, "r") as sc_log:
+        for line in sc_log:
+            if acct_kw in line:
+                global_player_geid = line.split(" ")[11]
+                return global_player_geid
+    return None
 
 
 def resource_path(rel):
@@ -95,47 +150,28 @@ class EventLogger:
         self.w.config(state=tk.DISABLED)
         self.w.see(tk.END)
 
+    # alias the other levels back to .log()
+    def debug(self, m):
+        self.log(f"[DEBUG] {m}")
+
+    def info(self, m):
+        self.log(f"[INFO] {m}")
+
+    def warning(self, m):
+        self.log(f"[WARNING] {m}")
+
+    def error(self, m):
+        self.log(f"[ERROR] {m}")
+
+    def success(self, m):
+        self.log(f"[SUCCESS] {m}")
+
 
 def show_loading_animation(logger, app):
     for dots in [".", "..", "..."]:
         logger.log(dots)
         app.update_idletasks()
         time.sleep(0.2)
-
-
-def destroy_player_zone(line, logger):
-    global global_active_ship
-    global global_active_ship_id
-    if ("N/A" != global_active_ship) or ("N/A" != global_active_ship_id):
-        print(f"Ship Destroyed: {global_active_ship} with ID: {global_active_ship_id}")
-        global_active_ship = "N/A"
-        global_active_ship_id = "N/A"
-
-
-def set_ac_ship(line, logger):
-    global global_active_ship
-    global_active_ship = line.split(" ")[5][1:-1]
-    print("Player has entered ship: ", global_active_ship)
-
-
-def set_player_zone(line, logger):
-    global global_active_ship
-    global global_active_ship_id
-    line_index = line.index("-> Entity ") + len("-> Entity ")
-    if 0 == line_index:
-        print("Active Zone Change: ", global_active_ship)
-        global_active_ship = "N/A"
-        return
-    potential_zone = line[line_index:].split(" ")[0]
-    potential_zone = potential_zone[1:-1]
-    for x in global_ship_list:
-        if potential_zone.startswith(x):
-            global_active_ship = potential_zone[: potential_zone.rindex("_")]
-            global_active_ship_id = potential_zone[potential_zone.rindex("_") + 1 :]
-            print(
-                f"Active Zone Change: {global_active_ship} with ID: {global_active_ship_id}"
-            )
-            return
 
 
 def check_if_process_running(process_name):
@@ -187,6 +223,7 @@ def set_sc_log_location():
     if log_path:
         print("Setting SC_LOG_LOCATION to:", log_path)
         os.environ["SC_LOG_LOCATION"] = log_path
+
         return log_path
     else:
         print("Game.log not found in expected locations.")
@@ -200,6 +237,7 @@ ignore_kill_substrings = [
     "PU_Human",
     "kopion",
     "marok",
+    "vlk_juvenile_sentry_",
 ]
 
 
@@ -282,6 +320,7 @@ def activate_key(key_entry):
 def get_player_name(log_file_location):
     # Retrieve the RSI handle using the existing function
     rsi_handle = find_rsi_handle(log_file_location)
+    find_rsi_geid(log_file_location)
     if not rsi_handle:
         print("Error: RSI handle not found.")
         return None
@@ -289,136 +328,12 @@ def get_player_name(log_file_location):
 
 
 # ─── Play sound on kill ──────────────────────────────────────────────────────
-def play_kill_sound():
-    path = resource_path(os.path.join("assets", "kill.wav"))
-    winsound.PlaySound(path, winsound.SND_FILENAME)
+class SoundsAdapter:
+    def __init__(self, logger):
+        self.log = logger
 
-
-# ─── Kill parsing & upload ──────────────────────────────────────────────────────
-def parse_kill_line(line: str, target: str, logger: EventLogger):
-    if global_game_mode == "EA_FreeFlight" and "Crash" in line:
-        return
-
-    parts = line.split(" ")
-    kill_time = parts[0].strip("<>")
-    killed = parts[5].strip("'")
-    killed_zone = parts[9].strip("'")
-    killer = parts[12].strip("'")
-    weapon = parts[15].strip("'")
-    dmg = parts[21].strip("'")
-
-    # ——— Death case ———
-    if killed == target and killer.lower() != "unknown":
-        mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
-
-        death = {
-            "killer": killer,
-            "victim": target,
-            "time": kill_time,
-            "zone": killed_zone,
-            "weapon": weapon,
-            "damage_type": dmg,
-            "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killer}",
-            "game_mode": global_game_mode,
-            "mode": mode,
-            "killers_ship": global_active_ship,
-        }
-        hdrs = {
-            "Authorization": f"Bearer {api_key['value']}",
-            "Content-Type": "application/json",
-        }
-        try:
-            requests.post(
-                f"{BACKEND_URL}/reportDeath",
-                headers=hdrs,
-                json=death,
-                timeout=5,
-            )
-        except Exception as e:
-            logger.log(f"❌ Failed to report death: {e}")
-        logger.log("You DIED.")
-        return
-
-    # ——— Kill case ———
-    mode = "ac-kill" if global_game_mode.startswith("EA_") else "pu-kill"
-    json_data = {
-        "player": target,
-        "victim": killed,
-        "time": kill_time,
-        "zone": killed_zone,
-        "weapon": weapon,
-        "rsi_profile": f"https://robertsspaceindustries.com/citizens/{killed}",
-        "game_mode": global_game_mode,
-        "mode": mode,
-        "client_ver": local_version,
-        "killers_ship": global_active_ship,
-        "damage_type": dmg,
-    }
-    hdrs = {
-        "Authorization": f"Bearer {api_key['value']}",
-        "Content-Type": "application/json",
-    }
-    try:
-        r = requests.post(
-            REPORT_KILL_URL,
-            headers=hdrs,
-            json=json_data,
-            timeout=5,
-        )
-        if r.status_code in (200, 201):
-            logger.log(f"✅ Kill recorded: {killed} @ {kill_time}")
-        else:
-            logger.log(f"❌ Upload failed ({r.status_code})")
-    except Exception as e:
-        logger.log(f"Error sending kill: {e}")
-
-
-def read_existing_log(log_file_location, rsi_name):
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        read_log_line(line, rsi_name, True, logger)
-
-
-def find_rsi_handle(log_file_location):
-    acct_str = "<Legacy login response> [CIG-net] User Login Success"
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        if -1 != line.find(acct_str):
-            line_index = line.index("Handle[") + len("Handle[")
-            if 0 == line_index:
-                print("RSI_HANDLE: Not Found!")
-                exit()
-            potential_handle = line[line_index:].split(" ")[0]
-            return potential_handle[0:-1]
-    return None
-
-
-def find_rsi_geid(log_file_location):
-    global global_player_geid
-    acct_kw = "AccountLoginCharacterStatus_Character"
-    sc_log = safe_open(log_file_location, "r")
-    lines = sc_log.readlines()
-    for line in lines:
-        if -1 != line.find(acct_kw):
-            global_player_geid = line.split(" ")[11]
-            print("Player geid: " + global_player_geid)
-            return
-
-
-def set_game_mode(line, logger):
-    global global_game_mode
-    global global_active_ship
-    global global_active_ship_id
-    split_line = line.split(" ")
-    game_mode = split_line[8].split("=")[1].strip('"')
-    if game_mode != global_game_mode:
-        global_game_mode = game_mode
-
-    if "SC_Default" == global_game_mode:
-        global_active_ship = "N/A"
-        global_active_ship_id = "N/A"
+    def play_random_sound(self):
+        play_kill_sound()
 
 
 def setup_gui(game_running):
@@ -430,7 +345,7 @@ def setup_gui(game_running):
 
     try:
         font_path = resource_path("Orbitron.ttf")
-        custom_font = tkFont.Font(file=font_path, size=12)
+        custom_font = tkFont.Font(family="Orbitron", size=12)
         app.option_add("*Font", custom_font)
     except Exception as e:
         print(f"Failed to load custom font: {e}")
@@ -449,11 +364,11 @@ def setup_gui(game_running):
 
     # Add Banner
     try:
-        banner_path = resource_path("3R_Transparent.png")
+        banner_path = resource_path(os.path.join("assets", "3R_Transparent.png"))
         original_image = Image.open(banner_path)
 
         # Resize to 50% of original size (or change to specific size like (600, 150))
-        resized_image = original_image.resize((480, 150), Image.Resampling.LANCZOS)
+        resized_image = original_image.resize((179, 146), Image.Resampling.LANCZOS)
 
         banner_image = ImageTk.PhotoImage(resized_image)
         banner_label = tk.Label(app, image=banner_image, bg="#1a1a1a")
@@ -699,120 +614,41 @@ def start_api_key_countdown(expiration_time: datetime, api_status_label):
     countdown()
 
 
-def read_log_line(line, rsi_name, upload_kills, logger):
-    if -1 != line.find("<Context Establisher Done>"):
-        set_game_mode(line, logger)
-    elif -1 != line.find(rsi_name):
-        if -1 != line.find("OnEntityEnterZone"):
-            set_player_zone(line, logger)
-        if (
-            -1 != line.find("CActor::Kill")
-            and not check_substring_list(line, ignore_kill_substrings)
-            and upload_kills
-        ):
-            parse_kill_line(line, rsi_name, logger)
-    elif (
-        -1 != line.find("CPlayerShipRespawnManager::OnVehicleSpawned")
-        and ("SC_Default" != global_game_mode)
-        and (-1 != line.find(global_player_geid))
-    ):
-        set_ac_ship(line, logger)
-    elif (
-        (-1 != line.find("<Vehicle Destruction>"))
-        or (-1 != line.find("<local client>: Entering control state dead"))
-    ) and (-1 != line.find(global_active_ship_id)):
-        destroy_player_zone(line, logger)
+if __name__ == "__main__":
+    # 1) launch GUI & get logger
+    app, logger = setup_gui(is_game_running())
 
-
-def tail_log(log_file_location, rsi_name, logger):
-    """Read the log file and display events in the GUI."""
-    global global_game_mode, global_player_geid
-    sc_log = safe_open(log_file_location, "r")
-    if sc_log is None:
-        logger.log(f"No log file found at {log_file_location}.")
-        return
-
-    logger.log("Kill Tracking Initiated...")
-    logger.log("Enter key to establish Servitor connection...")
-
-    # Read all lines to find out what game mode player is currently, in case they booted up late.
-    # Don't upload kills, we don't want repeating last sessions kills incase they are actually available.
-    lines = sc_log.readlines()
-    print(
-        "Loading old log (if available)! Kills shown will not be uploaded as they are stale."
-    )
-    for line in lines:
-        read_log_line(line, rsi_name, False, logger)
-
-    # Main loop to monitor the log
-    last_log_file_size = os.stat(log_file_location).st_size
-    while True:
-        where = sc_log.tell()
-        line = sc_log.readline()
-        if not line:
-            time.sleep(1)
-            sc_log.seek(where)
-            if last_log_file_size > os.stat(log_file_location).st_size:
-                sc_log.close()
-                sc_log = safe_open(log_file_location, "r")
-                last_log_file_size = os.stat(log_file_location).st_size
-        else:
-            read_log_line(line, rsi_name, True, logger)
-
-
-def start_tail_log_thread(log_file_location, rsi_name, logger):
-    """Start the log tailing in a separate thread."""
-    thread = threading.Thread(
-        target=tail_log, args=(log_file_location, rsi_name, logger)
-    )
-    thread.daemon = True
-    thread.start()
-
-
-def is_game_running():
-    """Check if Star Citizen is running."""
-    return check_if_process_running("StarCitizen") is not None
-
-
-def auto_shutdown(app, delay_in_seconds, logger=None):
-    def shutdown():
-        time.sleep(delay_in_seconds)
-        if logger:
-            logger.log(
-                "Application has been open for 72 hours. Shutting down in 60 seconds."
-            )
-        else:
-            print(
-                "Application has been open for 72 hours. Shutting down in 60 seconds."
-            )
-
-        time.sleep(60)
-
-        app.quit()
+    # 2) find the SC log file
+    log_file_location = set_sc_log_location()
+    if not log_file_location:
+        app.mainloop()
         sys.exit(0)
 
-    # Run the shutdown logic in a separate thread
-    shutdown_thread = threading.Thread(target=shutdown, daemon=True)
-    shutdown_thread.start()
+    # 3) grab your RSI handle & GEID
+    rsi_handle = find_rsi_handle(log_file_location)
+    find_rsi_geid(log_file_location)
+    player_geid = global_player_geid
 
+    # 4) wire up support modules
+    api = APIClient(api_key)
+    sounds = SoundsAdapter(logger)  # <— only here, after logger exists
+    cm = NullCM()
 
-if __name__ == "__main__":
-    game_running = is_game_running()
-
-    app, logger = setup_gui(game_running)
-
-    if game_running:
-        # Start log monitoring in a separate thread
-        log_file_location = set_sc_log_location()
-        if log_file_location:
-            rsi_handle = find_rsi_handle(log_file_location)
-            if rsi_handle:
-                start_tail_log_thread(log_file_location, rsi_handle, logger)
-
-    # Initiate auto-shutdown after 72 hours (72 * 60 * 60 seconds)
-    if logger:
-        auto_shutdown(app, 72 * 60 * 60, logger)  # Pass logger only if initialized
-    else:
-        auto_shutdown(app, 72 * 60 * 60)  # Fallback without logger
+    # 5) start the unified LogParser
+    monitoring = {"active": True}
+    parser = LogParser(
+        gui_module=logger,
+        api_client_module=api,
+        sound_module=sounds,
+        cm_module=cm,
+        local_version=local_version,
+        monitoring=monitoring,
+        rsi_handle={"current": rsi_handle},
+        player_geid={"current": player_geid},
+        active_ship={"current": global_active_ship},
+        anonymize_state=False,
+    )
+    parser.log_file_location = log_file_location
+    parser.start_tail_log_thread()
 
     app.mainloop()
