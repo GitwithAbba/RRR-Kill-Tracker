@@ -237,7 +237,6 @@ ignore_kill_substrings = [
     "PU_Human",
     "kopion",
     "marok",
-    "AIModule_Unmanned",
     "vlk_juvenile_sentry_",
 ]
 
