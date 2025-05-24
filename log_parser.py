@@ -4,6 +4,18 @@ from threading import Thread
 import re
 
 
+def safe_open(path, mode="r"):
+    """
+    Open text files in UTF-8 and fall back to replacing bad chars
+    rather than crashing on UnicodeDecodeError.
+    Supports read ('r'), write ('w'), append ('a'), etc.
+    """
+    if "w" in mode or "a" in mode:
+        return open(path, mode, encoding="utf-8")
+    # reading modes get error-replace
+    return open(path, mode, encoding="utf-8", errors="replace")
+
+
 class LogParser:
     """Parses the game.log file for Star Citizen."""
 
@@ -76,7 +88,7 @@ class LogParser:
     def tail_log(self) -> None:
         """Read the log file and display events in the GUI."""
         try:
-            sc_log = open(self.log_file_location, "r")
+            sc_log = safe_open(self.log_file_location, "r")
             if sc_log is None:
                 self.log.log(f"No log file found at {self.log_file_location}")
                 return
@@ -137,7 +149,7 @@ class LogParser:
                     sc_log.seek(where)
                     if last_log_file_size > stat(self.log_file_location).st_size:
                         sc_log.close()
-                        sc_log = open(self.log_file_location, "r")
+                        sc_log = safe_open(self.log_file_location, "r")
                         last_log_file_size = stat(self.log_file_location).st_size
                 else:
                     self.read_log_line(line, True)
@@ -382,7 +394,7 @@ class LogParser:
     def find_rsu_handle(self) -> str:
         """Get the current user's RSI handle."""
         acct_str = "<Legacy login response> [CIG-net] User Login Success"
-        with open(self.log_file_location, "r") as sc_log:
+        with safe_open(self.log_file_location, "r") as sc_log:
             for line in sc_log:
                 if acct_str in line:
                     idx = line.index("Handle[") + len("Handle[")
@@ -393,7 +405,7 @@ class LogParser:
     def find_rsi_geid(self) -> str:
         """Get the current user's GEID."""
         acct_kw = "AccountLoginCharacterStatus_Character"
-        with open(self.log_file_location, "r") as sc_log:
+        with safe_open(self.log_file_location, "r") as sc_log:
             for line in sc_log:
                 if acct_kw in line:
                     return line.split(" ")[11]

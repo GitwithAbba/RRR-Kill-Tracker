@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('config.py', '.'), ('assets\\3R_Transparent.png', 'assets'), ('assets\\kill.wav', 'assets')],
+    datas=[('3R_Transparent.ico', '.'), ('assets\\3R_Transparent.png', 'assets'), ('assets\\kill.wav', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

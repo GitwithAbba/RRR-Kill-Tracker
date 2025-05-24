@@ -1,0 +1,19 @@
+TRY THE BELOW COMMANDS AFTER ACIVATED VENV TO REMOVE OLD FILE AND REBUILD EXE
+
+# from inside your activated venv and project root
+
+Remove-Item .\dist -Recurse -Force
+Remove-Item .\build -Recurse -Force
+Remove-Item .\BeowulfHunterPy.spec -Force
+
+cmd /c "rmdir /s /q .\dist"
+cmd /c "rmdir /s /q .\build"
+cmd /c "del /q .\RRRthurTracker.spec"
+
+pyinstaller --clean --onefile --windowed `  
+--icon "3R_Transparent.ico"`
+--add-data "3R_Transparent.ico;." `  
+--add-data "assets\3R_Transparent.png;assets"`
+--add-data "assets\kill.wav;assets" `  
+--name "RRRthurTracker"`
+main.py

@@ -84,27 +84,6 @@ cm = CMClient()
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
-def find_rsi_handle(log_file_location):
-    acct_str = "<Legacy login response> [CIG-net] User Login Success"
-    with open(log_file_location, "r", encoding="utf-8", errors="replace") as sc_log:
-        for line in sc_log:
-            if acct_str in line:
-                idx = line.index("Handle[") + len("Handle[")
-                return line[idx:].split(" ")[0].rstrip("]")
-    return None
-
-
-def find_rsi_geid(log_file_location):
-    global global_player_geid
-    acct_kw = "AccountLoginCharacterStatus_Character"
-    with open(log_file_location, "r", encoding="utf-8", errors="replace") as sc_log:
-        for line in sc_log:
-            if acct_kw in line:
-                global_player_geid = line.split(" ")[11]
-                return global_player_geid
-    return None
-
-
 def safe_open(path, mode="r"):
     """
     Open text files in UTF-8 and fall back to replacing bad chars
@@ -115,6 +94,27 @@ def safe_open(path, mode="r"):
         return open(path, mode, encoding="utf-8")
     # reading modes get error-replace
     return open(path, mode, encoding="utf-8", errors="replace")
+
+
+def find_rsi_handle(log_file_location):
+    acct_str = "<Legacy login response> [CIG-net] User Login Success"
+    with safe_open(log_file_location, "r") as sc_log:
+        for line in sc_log:
+            if acct_str in line:
+                idx = line.index("Handle[") + len("Handle[")
+                return line[idx:].split(" ")[0].rstrip("]")
+    return None
+
+
+def find_rsi_geid(log_file_location):
+    global global_player_geid
+    acct_kw = "AccountLoginCharacterStatus_Character"
+    with safe_open(log_file_location, "r") as sc_log:
+        for line in sc_log:
+            if acct_kw in line:
+                global_player_geid = line.split(" ")[11]
+                return global_player_geid
+    return None
 
 
 def resource_path(rel):
@@ -223,6 +223,7 @@ def set_sc_log_location():
     if log_path:
         print("Setting SC_LOG_LOCATION to:", log_path)
         os.environ["SC_LOG_LOCATION"] = log_path
+
         return log_path
     else:
         print("Game.log not found in expected locations.")
@@ -236,6 +237,8 @@ ignore_kill_substrings = [
     "PU_Human",
     "kopion",
     "marok",
+    "AIModule_Unmanned",
+    "vlk_juvenile_sentry_",
 ]
 
 
