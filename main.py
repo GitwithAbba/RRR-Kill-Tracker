@@ -4,6 +4,7 @@ import psutil
 import requests
 import threading
 import webbrowser
+import customtkinter
 import tkinter as tk
 import tkinter.font as tkFont
 from tkinter import scrolledtext
@@ -145,9 +146,9 @@ class EventLogger:
         self.w = widget
 
     def log(self, m):
-        self.w.config(state=tk.NORMAL)
+        self.w.configure(state=tk.NORMAL)
         self.w.insert(tk.END, m + "\n")
-        self.w.config(state=tk.DISABLED)
+        self.w.configure(state=tk.DISABLED)
         self.w.see(tk.END)
 
     # alias the other levels back to .log()
@@ -237,7 +238,9 @@ ignore_kill_substrings = [
     "PU_Human",
     "kopion",
     "marok",
-    "vlk_juvenile_sentry_",
+    "vlk_juvenile_",
+    "vlk_adult_",
+    "Quasigrazer",
 ]
 
 
@@ -416,16 +419,17 @@ def setup_gui(game_running):
         key_label.pack(side=tk.LEFT, padx=(0, 5))
 
         # key_entry = tk.Entry(key_frame, width=30, font=("Times New Roman", 12))
-        key_entry = tk.Entry(
-            key_frame,
-            width=30,
+        key_entry = customtkinter.CTkEntry(
+            master=key_frame,
+            width=250,
+            height=30,
+            corner_radius=10,
+            placeholder_text="Enter Key",
             font=("Orbitron", 12),
-            highlightthickness=2,
-            highlightbackground="#ff0000",
-            highlightcolor="#ff0000",
-            bg="#0a0a0a",
-            fg="#ffffff",
-            insertbackground="#ff5555",
+            fg_color="#0a0a0a",
+            text_color="#ffffff",
+            border_color="#1501ae",
+            border_width=2,
         )
         key_entry.pack(side=tk.LEFT)
 
@@ -476,20 +480,21 @@ def setup_gui(game_running):
                 logger.log("Invalid key. Please enter a valid API key.")
                 api_status_label.config(text="API Status: Invalid", fg="red")
 
-        button_style = {
-            "bg": "#0f0f0f",
-            "fg": "#ff5555",
-            "activebackground": "#330000",
-            "activeforeground": "#ffffff",
-            "relief": "ridge",
-            "bd": 2,
-            "font": ("Orbitron", 12),
-        }
-
-        activate_button = tk.Button(
-            key_frame, text="Activate", command=activate_key, **button_style
+        button_style = customtkinter.CTkButton(
+            master=key_frame,
+            text="Activate",
+            command=activate_key,
+            width=100,
+            height=30,
+            corner_radius=10,
+            fg_color="#0f0f0f",  # Background
+            text_color="#008628",  # Text color
+            hover_color="#b1adc3",  # Hover background
+            font=("Orbitron", 12),
+            border_color="#1501ae",
+            border_width=2,
         )
-        activate_button.pack(side=tk.LEFT, padx=(5, 0))
+        button_style.pack(side=tk.LEFT, padx=(5, 0))
 
         # Load Existing Key
         def load_existing_key():
@@ -523,40 +528,43 @@ def setup_gui(game_running):
             expires_at = datetime.fromisoformat(info["expires_at"].rstrip("Z"))
             start_api_key_countdown(expires_at, api_status_label)
 
-        button_style = {
-            "bg": "#0f0f0f",
-            "fg": "#ff5555",
-            "activebackground": "#330000",
-            "activeforeground": "#ffffff",
-            "relief": "ridge",
-            "bd": 2,
-            "font": ("Orbitron", 12),
-        }
-
-        load_key_button = tk.Button(
-            key_frame,
+        load_key_button = customtkinter.CTkButton(
+            master=key_frame,
             text="Load Existing Key",
             command=load_existing_key,
-            **button_style,
+            width=150,
+            height=30,
+            corner_radius=10,
+            fg_color="#0f0f0f",
+            text_color="#008628",
+            hover_color="#b1adc3",
+            font=("Orbitron", 12),
+            border_color="#1501ae",
+            border_width=2,
         )
         load_key_button.pack(side=tk.LEFT, padx=(5, 0))
 
         # Log Display
-        text_area = scrolledtext.ScrolledText(
-            app,
-            wrap=tk.WORD,
-            width=80,
-            height=20,
-            state=tk.DISABLED,
-            bg="#121212",
-            fg="#ff4444",
-            insertbackground="#ff4444",
-            highlightthickness=2,
-            highlightbackground="#ff0000",
-            highlightcolor="#ff0000",
+        log_frame = customtkinter.CTkFrame(master=app, fg_color="transparent")
+        log_frame.pack(padx=10, pady=10)
+
+        # Textbox
+        text_area = customtkinter.CTkTextbox(
+            master=log_frame,
+            width=600,
+            height=250,
+            corner_radius=10,
+            fg_color="#121212",  # Background
+            text_color="#0086ff",  # Blue text
             font=("Orbitron", 12),
+            border_color="#1501ae",
+            border_width=2,
+            wrap="word",
         )
-        text_area.pack(padx=10, pady=10)
+        text_area._textbox.configure(yscrollcommand=lambda *args: None)
+
+        text_area.configure(state="disabled")
+        text_area.pack(side="left", fill="both", expand=True)
 
         logger = EventLogger(text_area)
 
